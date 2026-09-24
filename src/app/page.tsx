@@ -5,6 +5,7 @@ import { Upload, Loader2, AlertTriangle, CheckCircle, FileText, LogOut } from "l
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function Home() {
   const router = useRouter();
@@ -119,12 +120,17 @@ export default function Home() {
             </h1>
             <p className="text-gray-500 mt-1">ล็อกอินในชื่อ: {user.email}</p>
           </div>
-          <button 
-            onClick={handleLogout}
-            className="flex items-center gap-2 text-gray-600 hover:text-red-600 bg-gray-100 hover:bg-red-50 py-2 px-4 rounded-lg transition-colors font-medium text-sm"
-          >
-            <LogOut size={16} /> ออกจากระบบ
-          </button>
+          <div className="flex items-center gap-3">
+            <Link href="/rubrics" className="hidden sm:flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 py-2 px-4 rounded-lg transition-colors font-medium text-sm">
+              <FileText size={16} /> จัดการเกณฑ์ประเมิน (Rubrics)
+            </Link>
+            <button 
+              onClick={handleLogout}
+              className="flex items-center gap-2 text-gray-600 hover:text-red-600 bg-gray-100 hover:bg-red-50 py-2 px-4 rounded-lg transition-colors font-medium text-sm"
+            >
+              <LogOut size={16} /> ออกจากระบบ
+            </button>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
