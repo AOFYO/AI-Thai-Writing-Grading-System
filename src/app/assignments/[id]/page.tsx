@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, collection, addDoc, getDocs, query, where } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import { Loader2, ArrowLeft, UploadCloud, Play, CheckCircle, AlertTriangle, Image as ImageIcon, FileText } from "lucide-react";
 import Link from "next/link";
 
@@ -18,8 +18,11 @@ interface PendingFile {
   errorMsg?: string;
 }
 
-export default function AssignmentWorkspace({ params }: { params: { id: string } }) {
+export default function AssignmentWorkspace() {
   const router = useRouter();
+  const params = useParams();
+  const assignmentId = params?.id as string;
+  
   const [user, setUser] = useState<any>(null);
   const [authChecking, setAuthChecking] = useState(true);
   
@@ -34,25 +37,29 @@ export default function AssignmentWorkspace({ params }: { params: { id: string }
       if (!currentUser) router.push("/login");
       else {
         setUser(currentUser);
-        fetchAssignmentData(currentUser.uid);
+        if (assignmentId) {
+          fetchAssignmentData(currentUser.uid, assignmentId);
+        }
       }
       setAuthChecking(false);
     });
     return () => unsubscribe();
-  }, [router, params.id]);
+  }, [router, assignmentId]);
 
-  const fetchAssignmentData = async (uid: string) => {
+  const fetchAssignmentData = async (uid: string, id: string) => {
     try {
-      const docRef = doc(db, "assignments", params.id);
+      if (!id) return;
+      const docRef = doc(db, "assignments", id);
       const docSnap = await getDoc(docRef);
       if (docSnap.exists() && docSnap.data().createdBy === uid) {
         setAssignment({ id: docSnap.id, ...docSnap.data() });
       } else {
         router.push("/assignments"); // Not found or no permission
+        return;
       }
 
       // Fetch existing submissions
-      const subSnap = await getDocs(query(collection(db, "submissions"), where("assignmentId", "==", params.id)));
+      const subSnap = await getDocs(query(collection(db, "submissions"), where("assignmentId", "==", id)));
       setSubmissions(subSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (error) {
       console.error("Error fetching data", error);
@@ -270,7 +277,7 @@ export default function AssignmentWorkspace({ params }: { params: { id: string }
                     <div 
                       key={studentNo} 
                       className={`aspect-square flex items-center justify-center rounded-lg border text-sm transition-colors ${bgColor}`}
-                      title={sub ? `คะแนนรวม: ${sub.result.total_raw_score}` : "ยังไม่ส่ง/ยังไม่ได้ตรวจ"}
+                      title={sub ? "คะแนนรวม: " + sub.result.total_raw_score : "ยังไม่ส่ง/ยังไม่ได้ตรวจ"}
                     >
                       {studentNo}
                     </div>
