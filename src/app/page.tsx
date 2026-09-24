@@ -1,14 +1,34 @@
 "use client";
 
-import { useState } from "react";
-import { Upload, Loader2, AlertTriangle, CheckCircle, FileText } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Upload, Loader2, AlertTriangle, CheckCircle, FileText, LogOut } from "lucide-react";
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Authentication Check
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) {
+        router.push("/login");
+      } else {
+        setUser(currentUser);
+      }
+      setAuthChecking(false);
+    });
+    return () => unsubscribe();
+  }, [router]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -29,7 +49,7 @@ export default function Home() {
       // 1. Upload to Cloudinary
       const formData = new FormData();
       formData.append("file", file);
-      // Ensure these environment variables are set in Vercel
+      
       const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "";
       const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "";
       
@@ -71,17 +91,40 @@ export default function Home() {
     return "bg-red-100 text-red-800 border-red-200";
   };
 
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-500">
+        <Loader2 className="animate-spin h-8 w-8 mb-4 text-blue-600" />
+        กำลังตรวจสอบสิทธิ์...
+      </div>
+    );
+  }
+
+  if (!user) return null; // Prevent flicker before redirect
+
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-8">
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Header */}
-        <header className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <FileText className="text-blue-600" />
-            AI Thai Writing Grading System
-          </h1>
-          <p className="text-gray-500 mt-1">อัปโหลดกระดาษคำตอบเพื่อประเมินด้วย AI (หัวข้อ: รักษ์ภาษาไทย)</p>
+        {/* Header with User Info */}
+        <header className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+              <FileText className="text-blue-600" />
+              AI Thai Writing Grading
+            </h1>
+            <p className="text-gray-500 mt-1">ล็อกอินในชื่อ: {user.email}</p>
+          </div>
+          <button 
+            onClick={handleLogout}
+            className="flex items-center gap-2 text-gray-600 hover:text-red-600 bg-gray-100 hover:bg-red-50 py-2 px-4 rounded-lg transition-colors font-medium text-sm"
+          >
+            <LogOut size={16} /> ออกจากระบบ
+          </button>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -115,8 +158,8 @@ export default function Home() {
             </button>
 
             {error && (
-              <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg flex items-center gap-2 border border-red-200">
-                <AlertTriangle size={20} />
+              <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg flex items-center gap-2 border border-red-200 text-sm">
+                <AlertTriangle size={16} className="flex-shrink-0" />
                 <span>{error}</span>
               </div>
             )}
@@ -141,7 +184,6 @@ export default function Home() {
 
             {result && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {/* Confidence Score & Identity */}
                 <div className={`p-4 rounded-lg border ${getConfidenceColor(result.ocr_confidence_percent)} flex items-start justify-between`}>
                   <div>
                     <h3 className="font-semibold flex items-center gap-2">
@@ -167,7 +209,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Rubric Breakdown */}
                 <div>
                   <h3 className="font-semibold text-gray-800 mb-3 border-b pb-2">รายละเอียดคะแนน (สามารถกดแก้ได้)</h3>
                   <div className="space-y-3">
@@ -192,7 +233,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Transcribed Text */}
                 <div>
                   <h3 className="font-semibold text-gray-800 mb-2">ข้อความที่ AI แกะได้</h3>
                   <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 text-sm text-gray-700 font-serif leading-relaxed h-32 overflow-y-auto">
@@ -200,7 +240,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Feedback */}
                 <div>
                   <h3 className="font-semibold text-gray-800 mb-2">คำวิจารณ์เชิงบวก (Feedback)</h3>
                   <textarea 
@@ -208,6 +247,10 @@ export default function Home() {
                     rows={3}
                     defaultValue={result.teacher_feedback}
                   />
+                </div>
+
+                <div className="text-xs text-gray-400 text-right">
+                  วิเคราะห์โดย: {result.used_model}
                 </div>
 
                 <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors shadow-sm">
