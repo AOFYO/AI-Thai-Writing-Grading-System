@@ -5,7 +5,7 @@ import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, collection, addDoc, getDocs, query, where } from "firebase/firestore";
 import { useRouter } from "next/navigation";
-import { Loader2, ArrowLeft, UploadCloud, Play, CheckCircle, AlertTriangle, Image as ImageIcon } from "lucide-react";
+import { Loader2, ArrowLeft, UploadCloud, Play, CheckCircle, AlertTriangle, Image as ImageIcon, FileText } from "lucide-react";
 import Link from "next/link";
 
 interface PendingFile {
