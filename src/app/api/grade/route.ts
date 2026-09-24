@@ -1,62 +1,9 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
-// Initialize Gemini SDK
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-const SYSTEM_INSTRUCTION = `
-# Role (บทบาท)
-คุณคือ "ผู้ช่วยครูวิชาภาษาไทยระดับมัธยมศึกษา" ผู้เชี่ยวชาญด้านการตรวจข้อสอบอัตนัย หน้าที่ของคุณคือการอ่านกระดาษคำตอบจากภาพถ่าย สกัดข้อความที่นักเรียนเขียน และประเมินให้คะแนนอย่างยุติธรรมตามเกณฑ์ที่กำหนดอย่างเคร่งครัด
-
-# Instruction (คำสั่ง)
-1. อ่านข้อความลายมือจากภาพในส่วนของ "ฉบับที่ 2 การเขียน" 
-2. นับจำนวนบรรทัดที่นักเรียนเขียน (เกณฑ์คือ 12-15 บรรทัด)
-3. ตรวจสอบความชัดเจนของลายมือ และประเมิน "เปอร์เซ็นต์ความมั่นใจในการอ่าน (ocr_confidence_percent)" จาก 0 ถึง 100% หากเจอคำที่อ่านไม่ออกเลย ให้แทนที่คำนั้นด้วยเครื่องหมาย [อ่านไม่ออก] และถ้ามีคำอ่านไม่ออกเยอะ ให้ลด % ลง
-4. หากความมั่นใจต่ำกว่า 70% ให้ตั้งค่า "needs_human_review" เป็น true
-5. ตรวจหาคำผิดเพื่อใช้ในการหักคะแนน
-6. ประเมินคะแนนแยกตามเกณฑ์ (Rubric) 5 ด้าน
-7. ตอบกลับเป็นรูปแบบ JSON เท่านั้น
-
-# Rubric (เกณฑ์การให้คะแนน)
-หัวข้อ: "รักษ์ภาษาไทย" ความยาว 12-15 บรรทัด
-
-ด้านที่ 1: การตั้งชื่อเรื่อง (คะแนน 1-5)
-- 5 คะแนน = ครบ 4 ข้อ (สอดคล้องประเด็น, ใช้คำถูกต้อง, น่าสนใจ, กระชับ), 4=3ข้อ, 3=2ข้อ, 2=1ข้อ, 1=ไม่ได้ตั้งหรือไม่ได้ตามเกณฑ์เลย
-- *หมายเหตุ: หากนักเรียนนำชื่อหัวข้อมาตั้งเป็นชื่อเรื่องทื่อๆ โดยไม่คิดใหม่ อาจพิจารณาให้ 1 คะแนน*
-
-ด้านที่ 2: เนื้อหา (คะแนน 1-5, น้ำหนัก x3 ในใจ แต่ส่งค่าคะแนนดิบ 1-5 มา)
-- 5 คะแนน = ครบ 5 ข้อ (ตรงประเด็น, มีเอกภาพ, ลำดับความคิดต่อเนื่อง, เป็นเหตุเป็นผล, นำเสนอความคิดเชิงบวก)
-
-ด้านที่ 3: การใช้ภาษา (คะแนน 1-4)
-- 4 คะแนน = ครบ 4 ข้อ (ใช้ภาษาถูกต้อง, ภาษาระดับถูกต้อง, เว้นวรรคตอนถูก, ไม่เขียนฉีกคำ)
-
-ด้านที่ 4: ความเป็นระเบียบเรียบร้อยและตรงตามคำชี้แจง (คะแนน 1-3)
-- 3 คะแนน = ครบ 3 ข้อ (อ่านง่ายเป็นระเบียบ, สะอาดเรียบร้อย, 12-15 บรรทัด)
-
-ด้านที่ 5: การเขียนสะกดคำ (คะแนน 1-5)
-- นับจำนวนคำที่เขียนผิดซ้ำ (ให้นับเป็น 1 คำ)
-- 5=ถูกทุกคำ, 4=ผิด 1-3 คำ, 3=ผิด 4-6 คำ, 2=ผิด 7-9 คำ, 1=ผิด 10 คำขึ้นไป
-
-# Output JSON Schema
-{
-  "student_info": { "name_detected": "", "class": "", "number": "" },
-  "transcribed_text": "...",
-  "line_count": 0,
-  "ocr_confidence_percent": 0,
-  "needs_human_review": false,
-  "spelling_errors_found": [],
-  "evaluation": {
-    "c1_title": {"score": 0, "reason": ""},
-    "c2_content": {"score": 0, "reason": ""},
-    "c3_language": {"score": 0, "reason": ""},
-    "c4_neatness": {"score": 0, "reason": ""},
-    "c5_spelling": {"score": 0, "reason": ""}
-  },
-  "total_raw_score": 0,
-  "teacher_feedback": "",
-  "used_model": ""
-}
-`;
+const SYSTEM_INSTRUCTION = `ระบบเกณฑ์เก่าไม่ได้ใช้งานแล้ว ขอให้ใช้จาก dynamic rubric เท่านั้น`;
 
 export async function POST(req: Request) {
   try {
@@ -65,8 +12,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No image URL provided' }, { status: 400 });
     }
 
-    // สร้าง System Instruction แบบ Dynamic ตาม Rubric ที่ส่งมา
-    let currentSystemInstruction = SYSTEM_INSTRUCTION; // Default (รักษ์ภาษาไทย)
+    let currentSystemInstruction = SYSTEM_INSTRUCTION;
     
     if (rubricData && rubricData.criteria) {
       const criteriaText = rubricData.criteria
@@ -78,20 +24,26 @@ export async function POST(req: Request) {
         .join(',\n    ');
 
       currentSystemInstruction = `
-คุณคือผู้ช่วยครูเชี่ยวชาญการตรวจข้อสอบ หน้าที่ของคุณคือการอ่านกระดาษคำตอบจากภาพและประเมินให้คะแนนตามเกณฑ์อย่างเคร่งครัด
-หัวข้องาน: ${rubricData.title}
-คำอธิบาย: ${rubricData.description || "-"}
+คุณคือ "ครูผู้เชี่ยวชาญด้านภาษาไทย" หน้าที่ของคุณคือการประเมินและให้คะแนนงานเขียนของนักเรียนอย่างละเอียด ยุติธรรม และเป็นกลางที่สุด โดยอ้างอิงจาก "เกณฑ์การให้คะแนน (Rubric Scores)" ที่กำหนดไว้อย่างเคร่งครัด ห้ามใช้ความรู้สึกส่วนตัว และต้องอธิบายเหตุผลประกอบการให้คะแนนทุกหัวข้อ
+
+[บริบทของงานเขียน]
+หัวข้อ: ${rubricData.title}
+เงื่อนไขที่นักเรียนต้องทำ: ${rubricData.description || "-"}
 
 # Instruction (คำสั่ง)
-1. อ่านข้อความลายมือจากภาพ
-2. ประเมิน "เปอร์เซ็นต์ความมั่นใจในการอ่าน (ocr_confidence_percent)" 0-100% หากความมั่นใจต่ำกว่า 70% ให้ตั้งค่า "needs_human_review" เป็น true
-3. ประเมินคะแนนแยกตามเกณฑ์ (Rubric) ต่อไปนี้:
+1. อ่านข้อความลายมือจากภาพอย่างละเอียด
+2. ประเมิน "เปอร์เซ็นต์ความมั่นใจในการอ่าน (ocr_confidence_percent)" 0-100% หากความมั่นใจต่ำกว่า 85% ให้ตั้งค่า "needs_human_review" เป็น true
+3. ประเมินและให้คะแนนแยกตามเกณฑ์ (Rubric) ต่อไปนี้อย่างเคร่งครัด:
 ${criteriaText}
-4. ตอบกลับเป็นรูปแบบ JSON เท่านั้น ห้ามมีข้อความอื่น
+
+4. หักคะแนนหรือให้คะแนนตามเงื่อนไขที่ระบุใน description ของแต่ละเกณฑ์อย่างเคร่งครัด
+5. คำนวณคะแนนรวมทั้งหมดใส่ใน "total_raw_score"
+6. เขียนคำชมหรือข้อเสนอแนะสั้นๆ ใส่ใน "teacher_feedback"
+7. ตอบกลับเป็นรูปแบบ JSON ตามโครงสร้างด้านล่างนี้เท่านั้น
 
 # Output JSON Schema
 {
-  "transcribed_text": "...",
+  "transcribed_text": "ข้อความที่นักเรียนเขียนทั้งหมด (เว้นวรรคและย่อหน้าให้ตรงตามภาพ)",
   "ocr_confidence_percent": 0,
   "needs_human_review": false,
   "evaluation": {
@@ -103,14 +55,12 @@ ${criteriaText}
 `;
     }
 
-    // 1. Fetch image from Cloudinary
     const imageResp = await fetch(imageUrl);
     const arrayBuffer = await imageResp.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const base64Data = buffer.toString('base64');
     const mimeType = imageResp.headers.get('content-type') || 'image/jpeg';
 
-    // 2. Fallback Chain
     const fallbackModels = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
     let response;
     let successfulModel = '';
@@ -132,16 +82,14 @@ ${criteriaText}
           config: {
             systemInstruction: currentSystemInstruction,
             responseMimeType: "application/json",
-            temperature: 0.2
+            temperature: 0.1
           }
         });
         
         successfulModel = modelName;
-        break; // Exit loop if successful
+        break;
       } catch (err: any) {
         console.warn(`[Fallback Chain] Model ${modelName} failed:`, err.message);
-        
-        // If it's the last model in our list, we throw the error back to the frontend
         if (modelName === fallbackModels[fallbackModels.length - 1]) {
           throw new Error(`ระบบ AI ทุกตัวคิวเต็ม กรุณาลองใหม่ในภายหลัง (Error: ${err.message})`);
         }
@@ -154,8 +102,6 @@ ${criteriaText}
 
     const resultText = response.text || "{}";
     const parsedData = JSON.parse(resultText);
-    
-    // Add which model was actually used to the response
     parsedData.used_model = successfulModel;
 
     return NextResponse.json(parsedData);
