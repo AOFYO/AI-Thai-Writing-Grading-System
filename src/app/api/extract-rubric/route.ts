@@ -36,11 +36,13 @@ export async function POST(req: Request) {
     const base64Data = buffer.toString('base64');
     const mimeType = imageResp.headers.get('content-type') || 'image/jpeg';
 
-    const fallbackModels = ['gemini-3.8-flash', 'gemini-1.5-flash'];
+    const fallbackModels = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
     let response;
+    let lastError = "";
 
     for (const modelName of fallbackModels) {
       try {
+        console.log(`[Rubric Extractor] Attempting with ${modelName}...`);
         response = await ai.models.generateContent({
           model: modelName,
           contents: [
@@ -59,12 +61,15 @@ export async function POST(req: Request) {
           }
         });
         break; 
-      } catch (err) {
-        console.warn(`[Rubric Extractor] Model ${modelName} failed`);
+      } catch (err: any) {
+        console.warn(`[Rubric Extractor] Model ${modelName} failed:`, err.message);
+        lastError = err.message;
       }
     }
 
-    if (!response) throw new Error("AI is currently unavailable.");
+    if (!response) {
+      throw new Error(`ระบบ AI คิวเต็มทุกรุ่น กรุณาลองใหม่ในภายหลัง (Error: ${lastError})`);
+    }
 
     const resultText = response.text || "{}";
     return NextResponse.json(JSON.parse(resultText));
