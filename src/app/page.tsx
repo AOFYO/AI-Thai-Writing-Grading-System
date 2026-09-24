@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Upload, Loader2, AlertTriangle, CheckCircle, FileText, LogOut } from "lucide-react";
+import { Upload, Loader2, AlertTriangle, CheckCircle, FileText, LogOut, Folder } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
@@ -120,9 +120,12 @@ export default function Home() {
             </h1>
             <p className="text-gray-500 mt-1">ล็อกอินในชื่อ: {user.email}</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
+            <Link href="/assignments" className="flex items-center gap-2 text-green-700 bg-green-50 hover:bg-green-100 py-2 px-4 rounded-lg transition-colors font-medium text-sm border border-green-200">
+              <Folder size={16} /> เริ่มตรวจข้อสอบ (Assignments)
+            </Link>
             <Link href="/rubrics" className="hidden sm:flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 py-2 px-4 rounded-lg transition-colors font-medium text-sm">
-              <FileText size={16} /> จัดการเกณฑ์ประเมิน (Rubrics)
+              <FileText size={16} /> จัดการเกณฑ์ประเมิน
             </Link>
             <button 
               onClick={handleLogout}

@@ -60,9 +60,47 @@ const SYSTEM_INSTRUCTION = `
 
 export async function POST(req: Request) {
   try {
-    const { imageUrl } = await req.json();
+    const { imageUrl, rubricData } = await req.json();
     if (!imageUrl) {
       return NextResponse.json({ error: 'No image URL provided' }, { status: 400 });
+    }
+
+    // สร้าง System Instruction แบบ Dynamic ตาม Rubric ที่ส่งมา
+    let currentSystemInstruction = SYSTEM_INSTRUCTION; // Default (รักษ์ภาษาไทย)
+    
+    if (rubricData && rubricData.criteria) {
+      const criteriaText = rubricData.criteria
+        .map((c: any) => `- ${c.name} (คะแนนเต็ม ${c.max_score}): ${c.description}`)
+        .join('\n');
+        
+      const jsonSchemaEval = rubricData.criteria
+        .map((c: any) => `"${c.id}": {"score": 0, "reason": ""}`)
+        .join(',\n    ');
+
+      currentSystemInstruction = `
+คุณคือผู้ช่วยครูเชี่ยวชาญการตรวจข้อสอบ หน้าที่ของคุณคือการอ่านกระดาษคำตอบจากภาพและประเมินให้คะแนนตามเกณฑ์อย่างเคร่งครัด
+หัวข้องาน: ${rubricData.title}
+คำอธิบาย: ${rubricData.description || "-"}
+
+# Instruction (คำสั่ง)
+1. อ่านข้อความลายมือจากภาพ
+2. ประเมิน "เปอร์เซ็นต์ความมั่นใจในการอ่าน (ocr_confidence_percent)" 0-100% หากความมั่นใจต่ำกว่า 70% ให้ตั้งค่า "needs_human_review" เป็น true
+3. ประเมินคะแนนแยกตามเกณฑ์ (Rubric) ต่อไปนี้:
+${criteriaText}
+4. ตอบกลับเป็นรูปแบบ JSON เท่านั้น ห้ามมีข้อความอื่น
+
+# Output JSON Schema
+{
+  "transcribed_text": "...",
+  "ocr_confidence_percent": 0,
+  "needs_human_review": false,
+  "evaluation": {
+    ${jsonSchemaEval}
+  },
+  "total_raw_score": 0,
+  "teacher_feedback": ""
+}
+`;
     }
 
     // 1. Fetch image from Cloudinary
@@ -72,7 +110,7 @@ export async function POST(req: Request) {
     const base64Data = buffer.toString('base64');
     const mimeType = imageResp.headers.get('content-type') || 'image/jpeg';
 
-    // 2. Fallback Chain: Try models in order if they hit 503 (High Demand) or 429 (Rate Limit)
+    // 2. Fallback Chain
     const fallbackModels = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
     let response;
     let successfulModel = '';
@@ -92,7 +130,7 @@ export async function POST(req: Request) {
             }
           ],
           config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
+            systemInstruction: currentSystemInstruction,
             responseMimeType: "application/json",
             temperature: 0.2
           }
