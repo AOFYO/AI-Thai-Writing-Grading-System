@@ -155,6 +155,11 @@ export default function AssignmentWorkspace() {
       } catch (error: any) {
         updatePendingFile(item.id, { status: "error", errorMsg: error.message });
       }
+
+      // หน่วงเวลา 3 วินาที ป้องกันการยิง API ถี่เกินไปจนโดนแบน (Rate Limit)
+      if (filesToProcess.indexOf(item) !== filesToProcess.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
     }
 
     setIsProcessingBatch(false);
@@ -237,11 +242,16 @@ export default function AssignmentWorkspace() {
                           </div>
                         </div>
 
-                        <div className="w-32 flex justify-end">
+                        <div className="w-40 flex flex-col items-end justify-center">
                           {item.status === "pending" && <button onClick={() => removePendingFile(item.id)} className="text-sm text-red-500 hover:underline">ลบออก</button>}
                           {item.status === "processing" && <span className="text-blue-500 flex items-center gap-1 text-sm"><Loader2 size={14} className="animate-spin"/> กำลังตรวจ</span>}
                           {item.status === "success" && <span className="text-green-600 flex items-center gap-1 text-sm"><CheckCircle size={14}/> ตรวจสำเร็จ</span>}
-                          {item.status === "error" && <span className="text-red-500 flex items-center gap-1 text-sm" title={item.errorMsg}><AlertTriangle size={14}/> ผิดพลาด</span>}
+                          {item.status === "error" && (
+                            <div className="text-right">
+                              <span className="text-red-500 flex items-center justify-end gap-1 text-sm font-semibold"><AlertTriangle size={14}/> ผิดพลาด</span>
+                              <p className="text-xs text-red-400 mt-1 line-clamp-2 max-w-[150px]" title={item.errorMsg}>{item.errorMsg}</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
