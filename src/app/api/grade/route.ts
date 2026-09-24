@@ -74,7 +74,7 @@ export async function POST(req: Request) {
 
     // 2. Call Gemini AI API (using 1.5-flash as the current stable fast model)
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3.8-flash',
       contents: [
         {
           role: 'user',
