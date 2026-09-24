@@ -1,274 +1,366 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, addDoc } from "firebase/firestore";
+import { collection, addDoc, updateDoc, doc, getDocs, query, where, deleteDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
-import { Upload, Loader2, Save, FileText, ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, Save, FileText, Upload, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
-interface Criterion {
-  id: string;
-  name: string;
-  max_score: number;
-  description: string;
-}
-
-interface Rubric {
-  title: string;
-  description: string;
-  criteria: Criterion[];
-}
-
-export default function ManageRubrics() {
+export default function RubricsBuilderPage() {
   const router = useRouter();
-  const [authChecking, setAuthChecking] = useState(true);
   const [user, setUser] = useState<any>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  
+  const [myRubrics, setMyRubrics] = useState<any[]>([]);
+  const [selectedRubricId, setSelectedRubricId] = useState<string | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  
-  const [rubric, setRubric] = useState<Rubric>({
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const emptyRubric = {
     title: "",
     description: "",
-    criteria: []
-  });
+    criteria: [] as { id: string, name: string, max_score: number, description: string }[]
+  };
+
+  const [rubric, setRubric] = useState(emptyRubric);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) router.push("/login");
-      else setUser(currentUser);
+      else {
+        setUser(currentUser);
+        fetchRubrics(currentUser.uid);
+      }
       setAuthChecking(false);
     });
     return () => unsubscribe();
   }, [router]);
 
+  const fetchRubrics = async (uid: string) => {
+    const snap = await getDocs(query(collection(db, "rubrics"), where("createdBy", "==", uid)));
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    setMyRubrics(data);
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      setPreviewUrl(URL.createObjectURL(selectedFile));
+      const selected = e.target.files[0];
+      setFile(selected);
+      setPreviewUrl(URL.createObjectURL(selected));
     }
   };
 
   const extractRubric = async () => {
     if (!file) return;
     setIsExtracting(true);
-    
+
     try {
-      // 1. Upload image to Cloudinary
       const formData = new FormData();
       formData.append("file", file);
       formData.append("upload_preset", process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "");
-      
       const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "";
+      
       const cloudinaryRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
         method: "POST", body: formData,
       });
       const cloudinaryData = await cloudinaryRes.json();
-      if (!cloudinaryData.secure_url) throw new Error("อัปโหลดรูปภาพล้มเหลว");
 
-      // 2. Extract Rubric via Gemini Vision
-      const res = await fetch("/api/extract-rubric", {
+      const response = await fetch("/api/extract-rubric", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl: cloudinaryData.secure_url }),
       });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+
+      setRubric({
+        title: data.title || "",
+        description: data.description || "",
+        criteria: data.criteria || []
+      });
       
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "สกัดข้อมูลล้มเหลว");
-      
-      setRubric(data);
     } catch (error: any) {
-      alert("Error: " + error.message);
-    } finally {
-      setIsExtracting(false);
+      alert("Error extracting rubric: " + error.message);
     }
+    
+    setIsExtracting(false);
   };
 
   const handleSaveToFirestore = async () => {
-    if (!rubric.title || rubric.criteria.length === 0) {
-      alert("กรุณาระบุชื่อเกณฑ์และหัวข้อการประเมินให้ครบถ้วน");
+    if (!rubric.title) {
+      alert("กรุณาตั้งชื่อเกณฑ์ประเมิน");
       return;
     }
-    
     setIsSaving(true);
     try {
-      await addDoc(collection(db, "rubrics"), {
-        ...rubric,
-        createdBy: user.uid,
-        createdAt: new Date().toISOString()
-      });
-      alert("บันทึกเกณฑ์การประเมินสำเร็จ!");
-      router.push("/");
+      if (selectedRubricId) {
+        // Update existing
+        await updateDoc(doc(db, "rubrics", selectedRubricId), {
+          ...rubric,
+          updatedAt: new Date().toISOString()
+        });
+        alert("อัปเดตเกณฑ์ประเมินสำเร็จ!");
+      } else {
+        // Create new
+        await addDoc(collection(db, "rubrics"), {
+          ...rubric,
+          createdBy: user.uid,
+          createdAt: new Date().toISOString(),
+        });
+        alert("บันทึกเกณฑ์ประเมินใหม่สำเร็จ!");
+      }
+      // Refresh list and reset
+      await fetchRubrics(user.uid);
+      setRubric(emptyRubric);
+      setSelectedRubricId(null);
+      setFile(null);
+      setPreviewUrl(null);
     } catch (error: any) {
-      alert("เกิดข้อผิดพลาดในการบันทึก: " + error.message);
-    } finally {
-      setIsSaving(false);
+      alert("Error saving rubric: " + error.message);
     }
+    setIsSaving(false);
+  };
+
+  const loadRubricForEdit = (r: any) => {
+    setRubric({ title: r.title, description: r.description, criteria: r.criteria });
+    setSelectedRubricId(r.id);
+    setFile(null);
+    setPreviewUrl(null);
+  };
+
+  const handleDeleteRubric = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("คุณต้องการลบเกณฑ์นี้ใช่หรือไม่? (หากเกณฑ์นี้ถูกใช้ในชิ้นงานไปแล้ว ชิ้นงานนั้นอาจได้รับผลกระทบ)")) return;
+    try {
+      await deleteDoc(doc(db, "rubrics", id));
+      if (selectedRubricId === id) {
+        setRubric(emptyRubric);
+        setSelectedRubricId(null);
+      }
+      fetchRubrics(user.uid);
+    } catch (err) {
+      alert("ลบไม่สำเร็จ");
+    }
+  };
+
+  const createNewRubric = () => {
+    setRubric(emptyRubric);
+    setSelectedRubricId(null);
+    setFile(null);
+    setPreviewUrl(null);
   };
 
   if (authChecking || !user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" /></div>;
 
   return (
-    <main className="min-h-screen bg-gray-50 p-4 md:p-8">
-      <div className="max-w-5xl mx-auto space-y-6">
+    <main className="min-h-screen bg-gray-50 p-4 md:p-8 flex flex-col items-center">
+      <div className="max-w-6xl w-full space-y-6">
         
-        {/* Header */}
         <header className="flex items-center justify-between bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors">
-              <ArrowLeft size={20} className="text-gray-600" />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">สร้างเกณฑ์การประเมินใหม่ (Rubric Builder)</h1>
-              <p className="text-gray-500 text-sm">สร้างเกณฑ์ด้วยตัวเอง หรือให้ AI อ่านจากรูปภาพใบเกณฑ์ก็ได้</p>
-            </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800">สร้างและจัดการเกณฑ์ (Rubric Builder)</h1>
+            <p className="text-gray-500 mt-1">อัปโหลดภาพตารางเพื่อให้ AI ช่วยสร้างเกณฑ์อัตโนมัติ หรือแก้ไขเกณฑ์เดิม</p>
           </div>
+          <Link href="/" className="text-blue-600 hover:underline text-sm font-medium">กลับหน้าหลัก</Link>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           
-          {/* AI Extractor Column */}
-          <section className="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-4">
-            <h2 className="font-semibold text-gray-800">1. ใช้ AI สร้างจากรูปภาพ</h2>
+          {/* Sidebar: List of Rubrics */}
+          <section className="lg:col-span-1 bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-fit max-h-[80vh] overflow-y-auto">
+            <h2 className="font-semibold text-gray-800 mb-4 flex items-center gap-2 border-b pb-2">
+              <FileText size={18} className="text-blue-600" /> เกณฑ์ของคุณ
+            </h2>
             
-            <label className="flex flex-col items-center justify-center h-48 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors relative overflow-hidden">
-              {previewUrl ? (
-                <img src={previewUrl} className="absolute inset-0 w-full h-full object-contain p-2" alt="Rubric Preview" />
-              ) : (
-                <div className="text-center p-4">
-                  <Upload className="mx-auto h-8 w-8 text-gray-400 mb-2" />
-                  <p className="text-xs text-gray-500">อัปโหลดภาพตารางเกณฑ์</p>
-                </div>
-              )}
-              <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-            </label>
-
-            <button
-              onClick={extractRubric}
-              disabled={!file || isExtracting}
-              className="w-full bg-blue-100 text-blue-700 hover:bg-blue-200 font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+            <button 
+              onClick={createNewRubric}
+              className={`w-full py-2 px-3 text-sm font-medium rounded-lg flex items-center justify-center gap-2 mb-4 transition-colors ${!selectedRubricId ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
-              {isExtracting ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
-              {isExtracting ? "AI กำลังวิเคราะห์รูปภาพ..." : "ให้ AI สกัดเกณฑ์จากภาพนี้"}
+              <Plus size={16} /> + สร้างเกณฑ์ใหม่
             </button>
-            <p className="text-xs text-gray-400 text-center">AI จะอ่านตารางและสร้างฟอร์มด้านขวาให้อัตโนมัติ</p>
+
+            <div className="space-y-2">
+              {myRubrics.map(r => (
+                <div 
+                  key={r.id} 
+                  onClick={() => loadRubricForEdit(r)}
+                  className={`p-3 rounded-lg border cursor-pointer group flex justify-between items-start transition-colors ${selectedRubricId === r.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}
+                >
+                  <div>
+                    <h3 className={`font-medium text-sm line-clamp-2 ${selectedRubricId === r.id ? 'text-blue-700' : 'text-gray-800'}`}>{r.title}</h3>
+                    <p className="text-xs text-gray-500 mt-1">{r.criteria?.length || 0} หัวข้อ</p>
+                  </div>
+                  <button onClick={(e) => handleDeleteRubric(r.id, e)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              {myRubrics.length === 0 && (
+                <p className="text-center text-sm text-gray-400 py-4">ยังไม่มีเกณฑ์ที่สร้างไว้</p>
+              )}
+            </div>
           </section>
 
-          {/* Builder Form Column */}
-          <section className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-            <h2 className="font-semibold text-gray-800 mb-4">2. ตรวจสอบและแก้ไขเกณฑ์</h2>
+          {/* Main Area: Extractor & Builder */}
+          <div className="lg:col-span-3 space-y-6">
             
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อชุดเกณฑ์การประเมิน (เช่น สอบกลางภาควิชาภาษาไทย)</label>
-                <input 
-                  type="text" 
-                  value={rubric.title} 
-                  onChange={e => setRubric({...rubric, title: e.target.value})}
-                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="ตั้งชื่อเกณฑ์ประเมิน..."
-                />
-              </div>
+            {/* Auto Extractor (Only show when creating new) */}
+            {!selectedRubricId && (
+              <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-6 items-center">
+                <div className="flex-1 space-y-2">
+                  <h2 className="font-semibold text-gray-800 text-lg">สกัดเกณฑ์ด้วย AI Vision ✨</h2>
+                  <p className="text-sm text-gray-500">อัปโหลดภาพตารางเกณฑ์คะแนน แล้วให้ AI ดึงข้อมูลและวิธีคิดคะแนนมาสร้างเป็นฟอร์มให้อัตโนมัติ</p>
+                </div>
+                
+                <div className="w-full md:w-1/3 space-y-3">
+                  <label className="flex flex-col items-center justify-center h-24 border-2 border-dashed border-blue-300 rounded-xl cursor-pointer hover:bg-blue-50 relative overflow-hidden bg-gray-50 transition-colors">
+                    {previewUrl ? (
+                      <img src={previewUrl} className="absolute inset-0 w-full h-full object-cover opacity-50" alt="Rubric Preview" />
+                    ) : (
+                      <div className="text-center p-4">
+                        <Upload className="mx-auto h-6 w-6 text-blue-500 mb-1" />
+                        <p className="text-xs text-gray-500">คลิกเพื่ออัปโหลดรูปตาราง</p>
+                      </div>
+                    )}
+                    <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} ref={fileInputRef} />
+                  </label>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">คำอธิบายภาพรวม (ตัวเลือก)</label>
-                <input 
-                  type="text" 
-                  value={rubric.description}
-                  onChange={e => setRubric({...rubric, description: e.target.value})}
-                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                  placeholder="เช่น ความยาว 12-15 บรรทัด..."
-                />
-              </div>
+                  <button
+                    onClick={extractRubric}
+                    disabled={!file || isExtracting}
+                    className="w-full bg-blue-600 text-white hover:bg-blue-700 font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors text-sm"
+                  >
+                    {isExtracting ? <Loader2 className="animate-spin" size={16} /> : <FileText size={16} />}
+                    {isExtracting ? "AI กำลังดึงเกณฑ์..." : "ดึงเกณฑ์ด้วย AI"}
+                  </button>
+                </div>
+              </section>
+            )}
 
-              <hr className="my-4" />
+            {/* Builder Form Column */}
+            <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="font-semibold text-gray-800 text-lg">
+                  {selectedRubricId ? "แก้ไขชุดเกณฑ์ประเมิน" : "ฟอร์มสร้างเกณฑ์ประเมิน"}
+                </h2>
+                {selectedRubricId && <span className="bg-amber-100 text-amber-700 text-xs px-2 py-1 rounded-full font-medium">โหมดแก้ไข</span>}
+              </div>
               
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium text-gray-800">หัวข้อการประเมิน (Criteria)</h3>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อชุดเกณฑ์ประเมิน (เช่น งานเขียน ม.6)</label>
+                  <input 
+                    type="text" 
+                    value={rubric.title} 
+                    onChange={e => setRubric({...rubric, title: e.target.value})}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="พิมพ์ชื่อชุดเกณฑ์..."
+                  />
                 </div>
 
-                {rubric.criteria.map((criterion, index) => (
-                  <div key={criterion.id} className="p-4 border border-gray-200 rounded-lg bg-gray-50 space-y-3 relative">
-                    <button 
-                      onClick={() => setRubric({...rubric, criteria: rubric.criteria.filter(c => c.id !== criterion.id)})}
-                      className="absolute top-3 right-3 text-red-400 hover:text-red-600"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                    
-                    <div className="flex gap-4 pr-8">
-                      <div className="flex-1">
-                        <label className="block text-xs text-gray-500 mb-1">ชื่อหัวข้อ (เช่น ด้านเนื้อหา)</label>
-                        <input 
-                          type="text" 
-                          value={criterion.name}
-                          onChange={e => {
-                            const newC = [...rubric.criteria];
-                            newC[index].name = e.target.value;
-                            setRubric({...rubric, criteria: newC});
-                          }}
-                          className="w-full p-2 border border-gray-300 rounded outline-none text-sm"
-                        />
-                      </div>
-                      <div className="w-24 flex-shrink-0">
-                        <label className="block text-xs text-gray-500 mb-1">คะแนนเต็ม</label>
-                        <input 
-                          type="number" 
-                          value={criterion.max_score}
-                          onChange={e => {
-                            const newC = [...rubric.criteria];
-                            newC[index].max_score = Number(e.target.value);
-                            setRubric({...rubric, criteria: newC});
-                          }}
-                          className="w-full p-2 border border-gray-300 rounded outline-none text-sm"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">คำอธิบายเกณฑ์การให้คะแนน</label>
-                      <textarea 
-                        value={criterion.description}
-                        onChange={e => {
-                          const newC = [...rubric.criteria];
-                          newC[index].description = e.target.value;
-                          setRubric({...rubric, criteria: newC});
-                        }}
-                        rows={2}
-                        className="w-full p-2 border border-gray-300 rounded outline-none text-sm resize-none"
-                      />
-                    </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">คำอธิบายบริบท (บอก AI ถึงรูปแบบงาน หรือข้อจำกัด)</label>
+                  <textarea 
+                    value={rubric.description}
+                    onChange={e => setRubric({...rubric, description: e.target.value})}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none"
+                    placeholder="เช่น นักเรียนต้องเขียน 12-15 บรรทัด ตัวบรรจงครึ่งบรรทัด..."
+                    rows={2}
+                  />
+                </div>
+
+                <hr className="my-6 border-gray-100" />
+                
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-medium text-gray-800">หัวข้อการให้คะแนน (Criteria)</h3>
                   </div>
-                ))}
+
+                  {rubric.criteria.map((criterion, index) => (
+                    <div key={criterion.id} className="p-4 border border-gray-200 rounded-xl bg-gray-50/50 space-y-3 relative group transition-colors hover:border-blue-200">
+                      <button 
+                        onClick={() => setRubric({...rubric, criteria: rubric.criteria.filter(c => c.id !== criterion.id)})}
+                        className="absolute top-4 right-4 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="ลบหัวข้อนี้"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                      
+                      <div className="flex flex-col md:flex-row gap-4 md:pr-8">
+                        <div className="flex-1">
+                          <label className="block text-xs font-medium text-gray-600 mb-1">ชื่อหัวข้อย่อย</label>
+                          <input 
+                            type="text" 
+                            value={criterion.name}
+                            onChange={e => {
+                              const newC = [...rubric.criteria];
+                              newC[index].name = e.target.value;
+                              setRubric({...rubric, criteria: newC});
+                            }}
+                            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
+                          />
+                        </div>
+                        <div className="w-full md:w-32 flex-shrink-0">
+                          <label className="block text-xs font-medium text-gray-600 mb-1">คะแนนเต็มรวมน้ำหนัก</label>
+                          <input 
+                            type="number" 
+                            value={criterion.max_score}
+                            onChange={e => {
+                              const newC = [...rubric.criteria];
+                              newC[index].max_score = Number(e.target.value);
+                              setRubric({...rubric, criteria: newC});
+                            }}
+                            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-blue-600 bg-white"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">อธิบายวิธีการคิดคะแนน / เกณฑ์ย่อยให้ AI เข้าใจอย่างละเอียด</label>
+                        <textarea 
+                          value={criterion.description}
+                          onChange={e => {
+                            const newC = [...rubric.criteria];
+                            newC[index].description = e.target.value;
+                            setRubric({...rubric, criteria: newC});
+                          }}
+                          rows={4}
+                          className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-y bg-white font-mono leading-relaxed text-gray-700"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button 
+                  onClick={() => setRubric({
+                    ...rubric, 
+                    criteria: [...rubric.criteria, { id: Date.now().toString(), name: "", max_score: 5, description: "" }]
+                  })}
+                  className="w-full py-3 border-2 border-dashed border-blue-200 text-blue-600 rounded-xl hover:bg-blue-50 flex items-center justify-center gap-2 text-sm font-medium transition-colors mt-2"
+                >
+                  <Plus size={16} /> เพิ่มหัวข้อการประเมิน
+                </button>
+
               </div>
 
-              <button 
-                onClick={() => setRubric({
-                  ...rubric, 
-                  criteria: [...rubric.criteria, { id: Date.now().toString(), name: "", max_score: 5, description: "" }]
-                })}
-                className="w-full py-2 border-2 border-dashed border-gray-300 text-gray-500 rounded-lg hover:bg-gray-50 flex items-center justify-center gap-2 text-sm"
+              <button
+                onClick={handleSaveToFirestore}
+                disabled={isSaving || rubric.criteria.length === 0}
+                className="mt-8 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 transition-colors shadow-sm"
               >
-                <Plus size={16} /> เพิ่มหัวข้อประเมินใหม่
+                {isSaving ? <Loader2 className="animate-spin" /> : <Save size={20} />}
+                {selectedRubricId ? "บันทึกการแก้ไข (Update Rubric)" : "บันทึกเกณฑ์ประเมินใหม่ (Save New Rubric)"}
               </button>
 
-            </div>
-
-            <button
-              onClick={handleSaveToFirestore}
-              disabled={isSaving || rubric.criteria.length === 0}
-              className="mt-8 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {isSaving ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-              บันทึกชุดเกณฑ์ประเมินลงฐานข้อมูล
-            </button>
-
-          </section>
+            </section>
+          </div>
         </div>
       </div>
     </main>
