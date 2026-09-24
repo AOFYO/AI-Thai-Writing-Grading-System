@@ -53,7 +53,8 @@ const SYSTEM_INSTRUCTION = `
     "c5_spelling": {"score": 0, "reason": ""}
   },
   "total_raw_score": 0,
-  "teacher_feedback": ""
+  "teacher_feedback": "",
+  "used_model": ""
 }
 `;
 
@@ -64,35 +65,60 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No image URL provided' }, { status: 400 });
     }
 
-    // 1. Fetch image from Cloudinary to pass to Gemini as base64
-    // (Gemini API handles base64 inlineData directly without needing public URLs)
+    // 1. Fetch image from Cloudinary
     const imageResp = await fetch(imageUrl);
     const arrayBuffer = await imageResp.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const base64Data = buffer.toString('base64');
     const mimeType = imageResp.headers.get('content-type') || 'image/jpeg';
 
-    // 2. Call Gemini AI API (using 1.5-flash as the current stable fast model)
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { inlineData: { data: base64Data, mimeType } },
-            { text: "จงประเมินกระดาษคำตอบแผ่นนี้ตามเกณฑ์และตอบกลับเป็น JSON" }
-          ]
+    // 2. Fallback Chain: Try models in order if they hit 503 (High Demand) or 429 (Rate Limit)
+    const fallbackModels = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
+    let response;
+    let successfulModel = '';
+
+    for (const modelName of fallbackModels) {
+      try {
+        console.log(`Attempting to grade with ${modelName}...`);
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { inlineData: { data: base64Data, mimeType } },
+                { text: "จงประเมินกระดาษคำตอบแผ่นนี้ตามเกณฑ์และตอบกลับเป็น JSON" }
+              ]
+            }
+          ],
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: "application/json",
+            temperature: 0.2
+          }
+        });
+        
+        successfulModel = modelName;
+        break; // Exit loop if successful
+      } catch (err: any) {
+        console.warn(`[Fallback Chain] Model ${modelName} failed:`, err.message);
+        
+        // If it's the last model in our list, we throw the error back to the frontend
+        if (modelName === fallbackModels[fallbackModels.length - 1]) {
+          throw new Error(`ระบบ AI ทุกตัวคิวเต็ม กรุณาลองใหม่ในภายหลัง (Error: ${err.message})`);
         }
-      ],
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
-        temperature: 0.2
       }
-    });
+    }
+
+    if (!response) {
+      throw new Error('ไม่สามารถเชื่อมต่อ AI ได้');
+    }
 
     const resultText = response.text || "{}";
     const parsedData = JSON.parse(resultText);
+    
+    // Add which model was actually used to the response
+    parsedData.used_model = successfulModel;
 
     return NextResponse.json(parsedData);
   } catch (error: any) {
