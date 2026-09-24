@@ -7,7 +7,7 @@ const SYSTEM_INSTRUCTION = `ระบบเกณฑ์เก่าไม่ไ�
 
 export async function POST(req: Request) {
   try {
-    const { imageUrl, rubricData } = await req.json();
+    const { imageUrl, rubricData, customStylePrompt } = await req.json();
     if (!imageUrl) {
       return NextResponse.json({ error: 'No image URL provided' }, { status: 400 });
     }
@@ -26,8 +26,12 @@ export async function POST(req: Request) {
         .map((c: any) => `"${c.id}": {"score": 0, "reason": ""}`)
         .join(',\n    ');
 
+      const customStyleSection = customStylePrompt ? `\n[สไตล์การตรวจเฉพาะตัวของครู (Custom Skill / Persona)]\n${customStylePrompt}\n` : '';
+
       currentSystemInstruction = `
-คุณคือ "ครูผู้เชี่ยวชาญด้านภาษาไทย" หน้าที่ของคุณคือการประเมินและให้คะแนนงานเขียนของนักเรียนอย่างละเอียด ยุติธรรม และเป็นกลางที่สุด โดยอ้างอิงจาก "เกณฑ์การให้คะแนน (Rubric Scores)" ที่กำหนดไว้อย่างเคร่งครัด ห้ามใช้ความรู้สึกส่วนตัว และต้องอธิบายเหตุผลประกอบการให้คะแนนทุกหัวข้อ
+คุณคือ "ครูผู้เชี่ยวชาญด้านภาษาไทย" หน้าที่ของคุณคือการประเมินและให้คะแนนงานเขียนของนักเรียนอย่างละเอียด ยุติธรรม และเป็นกลางที่สุด 
+โดยอ้างอิงจาก "เกณฑ์การให้คะแนน (Rubric Scores)" ที่กำหนดไว้อย่างเคร่งครัด
+${customStyleSection}
 
 [บริบทของงานเขียน]
 หัวข้อ: ${rubricData.title}
@@ -39,8 +43,11 @@ export async function POST(req: Request) {
 3. ประเมินและให้คะแนนแยกตามเกณฑ์ (Rubric) ต่อไปนี้อย่างเคร่งครัด:
 ${criteriaText}
 
-4. หักคะแนนหรือให้คะแนนตามเงื่อนไขที่ระบุใน description ของแต่ละเกณฑ์อย่างเคร่งครัด
-5. คำนวณคะแนนรวมทั้งหมดใส่ใน "total_raw_score"
+4. กฎเหล็กในการเขียน "reason" (เหตุผลประกอบการประเมิน) สำหรับแต่ละเกณฑ์:
+   - คุณต้องวิเคราะห์ทีละข้อ โดยระบุให้ชัดเจนว่า "ตรวจพบว่าตรงกับเกณฑ์ย่อยข้อใดบ้าง" หรือ "พลาดเกณฑ์ย่อยข้อใด"
+   - ต้องแสดงสูตรการคิดคะแนนในบรรทัดสุดท้ายของ reason เสมอ ในรูปแบบ: "คะแนนดิบ [X] x น้ำหนัก [Y] = [Z] คะแนน"
+   - (หากเกณฑ์ไหนไม่มีน้ำหนัก ให้ระบุแค่คะแนนที่ได้)
+5. คำนวณคะแนนรวมที่ได้ทั้งหมดใส่ใน "total_raw_score"
 6. เขียนคำชมหรือข้อเสนอแนะสั้นๆ ใส่ใน "teacher_feedback"
 7. ตอบกลับเป็นรูปแบบ JSON ตามโครงสร้างด้านล่างนี้เท่านั้น
 

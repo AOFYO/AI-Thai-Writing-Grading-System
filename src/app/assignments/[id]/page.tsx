@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, collection, addDoc, updateDoc, getDocs, query, where } from "firebase/firestore";
 import { useRouter, useParams } from "next/navigation";
-import { Loader2, ArrowLeft, UploadCloud, Play, CheckCircle, AlertTriangle, FileText, Download, X, Save } from "lucide-react";
+import { Loader2, ArrowLeft, UploadCloud, CheckCircle, AlertTriangle, Download, X, Save, Sparkles, BrainCircuit } from "lucide-react";
 import Link from "next/link";
 
 interface PendingFile {
@@ -31,10 +31,18 @@ export default function AssignmentWorkspace() {
   
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // AI Skills State
+  const [skills, setSkills] = useState<any[]>([]);
+  const [selectedSkillId, setSelectedSkillId] = useState<string>("");
+  const [activeSkillText, setActiveSkillText] = useState<string>("");
+  const [isSkillEdited, setIsSkillEdited] = useState(false);
 
   // Review Modal State
   const [selectedSub, setSelectedSub] = useState<any>(null);
-  const [overrideScore, setOverrideScore] = useState<number>(0);
+  const [editedText, setEditedText] = useState("");
+  const [editedScores, setEditedScores] = useState<any>({});
   const [isSavingOverride, setIsSavingOverride] = useState(false);
 
   useEffect(() => {
@@ -44,6 +52,7 @@ export default function AssignmentWorkspace() {
         setUser(currentUser);
         if (assignmentId) {
           fetchAssignmentData(currentUser.uid, assignmentId);
+          fetchSkills();
         }
       }
       setAuthChecking(false);
@@ -66,14 +75,57 @@ export default function AssignmentWorkspace() {
       const subSnap = await getDocs(query(collection(db, "submissions"), where("assignmentId", "==", id)));
       setSubmissions(subSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (error) {
-      console.error("Error fetching data", error);
+      console.error("Error fetching assignment", error);
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    const files = Array.from(e.target.files);
-    
+  const fetchSkills = async () => {
+    try {
+      const snap = await getDocs(collection(db, "ai_skills"));
+      setSkills(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (error) {
+      console.error("Error fetching skills", error);
+    }
+  };
+
+  const handleSkillChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setSelectedSkillId(val);
+    setIsSkillEdited(false);
+    if (val === "") {
+      setActiveSkillText("");
+    } else {
+      const found = skills.find(s => s.id === val);
+      if (found) setActiveSkillText(found.prompt);
+    }
+  };
+
+  const handleSkillTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setActiveSkillText(e.target.value);
+    setIsSkillEdited(true);
+  };
+
+  const saveAsNewSkill = async () => {
+    const name = prompt("ตั้งชื่อสไตล์การตรวจใหม่นี้ (เช่น สไตล์ครูใจดี):");
+    if (!name) return;
+    try {
+      const newSkill = {
+        name,
+        prompt: activeSkillText,
+        createdBy: user.uid,
+        createdAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, "ai_skills"), newSkill);
+      await fetchSkills();
+      setSelectedSkillId(docRef.id);
+      setIsSkillEdited(false);
+      alert("บันทึกสไตล์การตรวจใหม่สำเร็จ!");
+    } catch (error: any) {
+      alert("บันทึกไม่สำเร็จ: " + error.message);
+    }
+  };
+
+  const handleFiles = (files: File[]) => {
     const newPending = files.map(f => {
       const match = f.name.match(/^(\d+)/);
       const studentNo = match ? match[1] : "";
@@ -87,6 +139,28 @@ export default function AssignmentWorkspace() {
     });
     setPendingFiles(prev => [...prev, ...newPending]);
   };
+
+  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) handleFiles(Array.from(e.target.files));
+  };
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(Array.from(e.dataTransfer.files));
+    }
+  }, []);
 
   const updatePendingFile = (id: string, updates: Partial<PendingFile>) => {
     setPendingFiles(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
@@ -102,7 +176,7 @@ export default function AssignmentWorkspace() {
     
     const missingNos = filesToProcess.filter(p => !p.studentNo.trim());
     if (missingNos.length > 0) {
-      alert("กรุณาระบุเลขที่นักเรียนให้ครบทุกรูปก่อนเริ่มตรวจ");
+      alert("กรุณาระบุเลขที่นักเรียนให้ครบทุกไฟล์ก่อนเริ่มตรวจ");
       return;
     }
 
@@ -121,19 +195,20 @@ export default function AssignmentWorkspace() {
           method: "POST", body: formData,
         });
         const cloudinaryData = await cloudinaryRes.json();
-        if (!cloudinaryData.secure_url) throw new Error("อัปโหลดรูปล้มเหลว");
+        if (!cloudinaryData.secure_url) throw new Error("อัปโหลดรูปภาพไม่สำเร็จ");
 
         const gradeRes = await fetch("/api/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
             imageUrl: cloudinaryData.secure_url,
-            rubricData: assignment.rubricData
+            rubricData: assignment.rubricData,
+            customStylePrompt: activeSkillText
           }),
         });
 
         const gradeData = await gradeRes.json();
-        if (!gradeRes.ok) throw new Error(gradeData.error || "AI วิเคราะห์ล้มเหลว");
+        if (!gradeRes.ok) throw new Error(gradeData.error || "AI ประมวลผลล้มเหลว");
 
         const newSub = {
           assignmentId: assignment.id,
@@ -146,42 +221,46 @@ export default function AssignmentWorkspace() {
         const subRef = await addDoc(collection(db, "submissions"), newSub);
         
         updatePendingFile(item.id, { status: "success", result: gradeData });
-        setSubmissions(prev => [...prev.filter(s => s.studentNumber !== newSub.studentNumber), { id: subRef.id, ...newSub }]); // Prevent dupe display if retried
-
-      } catch (error: any) {
-        updatePendingFile(item.id, { status: "error", errorMsg: error.message });
-      }
-
-      if (filesToProcess.indexOf(item) !== filesToProcess.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        setSubmissions(prev => [...prev.filter(s => s.studentNumber !== newSub.studentNumber), { id: subRef.id, ...newSub }]); 
+        
+        // Wait 3 seconds to avoid Gemini Free Tier rate limits
+        await new Promise(r => setTimeout(r, 3000));
+        
+      } catch (err: any) {
+        updatePendingFile(item.id, { status: "error", errorMsg: err.message });
+        break; // Stop loop on error
       }
     }
-
+    
     setIsProcessingBatch(false);
   };
 
-  const exportToCSV = () => {
-    // UTF-8 BOM for Excel Thai support
-    let csv = "\uFEFFเลขที่,คะแนนรวม,ความมั่นใจ AI,สถานะ\n";
-    
-    for (let i = 1; i <= assignment.maxStudents; i++) {
+  const getStatusColor = (sub: any) => {
+    if (sub.isOverridden) return "bg-blue-100 text-blue-700 border-blue-300"; // overridden
+    if (sub.result?.needs_human_review) return "bg-yellow-100 text-yellow-700 border-yellow-300"; // unsure
+    return "bg-green-100 text-green-700 border-green-300"; // solid
+  };
+
+  const exportCSV = () => {
+    if (!assignment) return;
+    const maxStudents = assignment.maxStudents || 0;
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+    csvContent += "เลขที่,คะแนนรวม,สถานะการตรวจ\n";
+
+    for (let i = 1; i <= maxStudents; i++) {
       const sub = submissions.find(s => s.studentNumber === i);
       if (sub) {
-        const overrideMark = sub.result.is_overridden ? " (แก้โดยครู)" : "";
-        const score = sub.result.total_raw_score + overrideMark;
-        const conf = sub.result.ocr_confidence_percent + "%";
-        const status = sub.result.needs_human_review ? "ควรตรวจสอบซ้ำ" : "ตรวจแล้ว";
-        csv += `${i},${score},${conf},${status}\n`;
+        const score = sub.isOverridden ? sub.overrideScore : sub.result?.total_raw_score;
+        csvContent += `${i},${score},ตรวจแล้ว\n`;
       } else {
-        csv += `${i},0,0%,ยังไม่ส่ง\n`;
+        csvContent += `${i},0,ยังไม่ส่ง\n`;
       }
     }
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    
+    const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
-    link.href = url;
-    link.download = `คะแนน_${assignment.title}.csv`;
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `คะแนน_${assignment.title}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -189,276 +268,339 @@ export default function AssignmentWorkspace() {
 
   const openReviewModal = (sub: any) => {
     setSelectedSub(sub);
-    setOverrideScore(sub.result.total_raw_score);
+    setEditedText(sub.result?.transcribed_text || "");
+    
+    // Initialize editedScores with current evaluation scores
+    const initialScores: any = {};
+    if (sub.result?.evaluation) {
+      Object.keys(sub.result.evaluation).forEach(k => {
+        initialScores[k] = sub.result.evaluation[k].score || 0;
+      });
+    }
+    setEditedScores(initialScores);
   };
 
-  const handleSaveOverride = async () => {
+  const handleScoreChange = (criteriaId: string, val: number) => {
+    setEditedScores((prev: any) => ({ ...prev, [criteriaId]: val }));
+  };
+
+  const calculateNewTotal = () => {
+    return Object.values(editedScores).reduce((acc: number, curr: any) => acc + Number(curr), 0);
+  };
+
+  const saveOverride = async () => {
     if (!selectedSub) return;
     setIsSavingOverride(true);
     try {
-      const docRef = doc(db, "submissions", selectedSub.id);
-      await updateDoc(docRef, {
-        "result.total_raw_score": overrideScore,
-        "result.is_overridden": true
+      const newTotal = calculateNewTotal();
+      
+      // Update local state deeply
+      const updatedResult = { ...selectedSub.result };
+      updatedResult.transcribed_text = editedText;
+      updatedResult.total_raw_score = newTotal;
+      if (updatedResult.evaluation) {
+        Object.keys(editedScores).forEach(k => {
+          if (updatedResult.evaluation[k]) {
+            updatedResult.evaluation[k].score = editedScores[k];
+          }
+        });
+      }
+
+      await updateDoc(doc(db, "submissions", selectedSub.id), {
+        result: updatedResult,
+        isOverridden: true,
+        overrideScore: newTotal,
+        overriddenAt: new Date().toISOString()
       });
       
-      setSubmissions(prev => prev.map(s => 
-        s.id === selectedSub.id 
-          ? { ...s, result: { ...s.result, total_raw_score: overrideScore, is_overridden: true } } 
-          : s
-      ));
+      setSubmissions(prev => prev.map(s => s.id === selectedSub.id ? { ...s, result: updatedResult, isOverridden: true, overrideScore: newTotal } : s));
       setSelectedSub(null);
-    } catch (error) {
-      alert("บันทึกคะแนนล้มเหลว");
+    } catch (err: any) {
+      alert("บันทึกไม่สำเร็จ: " + err.message);
     }
     setIsSavingOverride(false);
   };
 
-  if (authChecking || !user || !assignment) {
-    return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" /></div>;
-  }
-
-  const roster = Array.from({ length: assignment.maxStudents }, (_, i) => i + 1);
+  if (authChecking || !user || !assignment) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" /></div>;
 
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         
         {/* Header */}
-        <header className="flex flex-wrap items-center justify-between bg-white p-6 rounded-xl shadow-sm border border-gray-100 gap-4">
+        <header className="flex items-center justify-between bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="flex items-center gap-4">
-            <Link href="/assignments" className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors">
-              <ArrowLeft size={20} className="text-gray-600" />
+            <Link href="/assignments" className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors text-gray-700">
+              <ArrowLeft size={20} />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-800 line-clamp-1">{assignment.title} ({assignment.className})</h1>
-              <p className="text-gray-500 text-sm flex items-center gap-2">
-                <FileText size={14}/> เกณฑ์: {assignment.rubricData?.title || 'ไม่ได้ระบุ'}
+              <h1 className="text-xl md:text-2xl font-bold text-gray-900 leading-tight">
+                {assignment.title} <span className="text-gray-500 font-medium text-lg">({assignment.className})</span>
+              </h1>
+              <p className="text-sm text-gray-600 mt-1 flex items-center gap-1">
+                <FileText size={14}/> เกณฑ์: {assignment.rubricData?.title}
               </p>
             </div>
           </div>
-          <button 
-            onClick={exportToCSV}
-            className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-2 rounded-lg font-medium transition-colors border border-blue-200"
-          >
-            <Download size={18} /> ส่งออกคะแนน (CSV)
+          <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2 bg-white border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 font-medium text-sm transition-colors shadow-sm">
+            <Download size={16} /> ส่งออกคะแนน (CSV)
           </button>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* AI Skills Selection */}
+        <section className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-xl shadow-sm border border-indigo-100">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600">
+              <BrainCircuit size={20} />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-gray-900">สไตล์การตรวจ (Custom AI Skill)</h2>
+              <p className="text-sm text-gray-600">เลือกสไตล์การตรวจของครูท่านอื่น หรือพิมพ์กำหนดตรรกะใหม่เอง เพื่อให้ AI ตรวจได้ตรงใจคุณมากที่สุด</p>
+            </div>
+          </div>
           
-          {/* Left/Top: Batch Dropzone & Queue */}
-          <section className="lg:col-span-2 space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                <UploadCloud className="text-blue-600" /> อัปโหลดกระดาษคำตอบ (Batch Upload)
-              </h2>
-              
-              <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-blue-50 transition-colors bg-gray-50">
-                <div className="text-center">
-                  <p className="text-gray-700 font-medium">คลิกเพื่อเลือกไฟล์รูปภาพ (เลือกได้หลายไฟล์พร้อมกัน)</p>
-                  <p className="text-gray-400 text-sm mt-1">ตั้งชื่อไฟล์เป็น "เลขที่.jpg" (เช่น 1.jpg) ระบบจะจับคู่ให้อัตโนมัติ</p>
-                </div>
-                <input type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
-              </label>
+          <div className="space-y-4 bg-white p-4 rounded-xl border border-white shadow-sm">
+            <div>
+              <select 
+                value={selectedSkillId}
+                onChange={handleSkillChange}
+                className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900 font-medium bg-white"
+              >
+                <option value="">-- ไม่ใช้สไตล์ (อิงตาม Rubric ปกติ) --</option>
+                {skills.map(s => (
+                  <option key={s.id} value={s.id}>{s.name} {s.createdBy === user.uid ? "(ของคุณ)" : ""}</option>
+                ))}
+              </select>
+            </div>
+            
+            {(selectedSkillId !== "" || isSkillEdited) && (
+              <div>
+                <textarea 
+                  value={activeSkillText}
+                  onChange={handleSkillTextChange}
+                  rows={3}
+                  className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-gray-900 bg-gray-50 resize-y"
+                  placeholder="พิมพ์ตรรกะหรือสไตล์การตรวจของคุณ เช่น ใจดี เน้นความคิดสร้างสรรค์ หักคะแนนคำหยาบ..."
+                />
+                {isSkillEdited && (
+                  <button 
+                    onClick={saveAsNewSkill}
+                    className="mt-2 text-sm text-indigo-600 font-medium hover:underline flex items-center gap-1"
+                  >
+                    <Save size={14} /> บันทึกเป็นสไตล์ของฉัน (Clone & Save)
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
 
-              {pendingFiles.length > 0 && (
-                <div className="mt-6 border-t pt-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-medium text-gray-700">คิวเตรียมตรวจ ({pendingFiles.length} รูป)</h3>
-                    <button 
-                      onClick={startBatchProcess}
-                      disabled={isProcessingBatch}
-                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 disabled:opacity-50"
-                    >
-                      {isProcessingBatch ? <Loader2 className="animate-spin" size={18}/> : <Play size={18}/>}
-                      {isProcessingBatch ? "กำลังให้ AI ทยอยตรวจ..." : "เริ่มตรวจทั้งหมด"}
+        {/* Top: Upload Section */}
+        <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <UploadCloud size={20} className="text-blue-600"/> อัปโหลดกระดาษคำตอบ (Batch Upload)
+          </h2>
+          
+          <div 
+            className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors relative ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50 hover:bg-gray-100'}`}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+          >
+            <input type="file" multiple accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={onFileSelect} />
+            <UploadCloud className={`mx-auto h-10 w-10 mb-3 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`} />
+            <p className="text-gray-900 font-medium text-lg">ลากไฟล์รูปภาพมาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์</p>
+            <p className="text-gray-500 text-sm mt-1">ตั้งชื่อไฟล์เป็น "เลขที่.jpg" (เช่น 1.jpg) ระบบจะจับคู่ให้อัตโนมัติ</p>
+          </div>
+
+          {pendingFiles.length > 0 && (
+            <div className="mt-6">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-semibold text-gray-800">คิวตรวจข้อสอบ ({pendingFiles.length} ไฟล์)</h3>
+                <button 
+                  onClick={startBatchProcess}
+                  disabled={isProcessingBatch || !pendingFiles.some(p => p.status === 'pending' || p.status === 'error')}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-50 transition-colors"
+                >
+                  {isProcessingBatch ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />}
+                  เริ่มตรวจข้อสอบทั้งหมด
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[300px] overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-100">
+                {pendingFiles.map((pf) => (
+                  <div key={pf.id} className="relative bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm group">
+                    <button onClick={() => removePendingFile(pf.id)} className="absolute top-1 right-1 bg-white/80 p-1 rounded-full text-gray-500 hover:text-red-500 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <X size={14} />
                     </button>
+                    <img src={pf.preview} alt="preview" className="w-full h-24 object-cover" />
+                    <div className="p-2 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-semibold text-gray-600">เลขที่:</label>
+                        <input 
+                          type="text" 
+                          value={pf.studentNo}
+                          onChange={e => updatePendingFile(pf.id, { studentNo: e.target.value })}
+                          className="w-full border-b border-gray-300 outline-none text-sm text-center font-bold text-gray-900 focus:border-blue-500"
+                        />
+                      </div>
+                      <div className="flex justify-center">
+                        {pf.status === 'pending' && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded w-full text-center font-medium">รอตรวจ</span>}
+                        {pf.status === 'processing' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded flex items-center justify-center gap-1 w-full font-medium"><Loader2 size={12} className="animate-spin"/> กำลังตรวจ</span>}
+                        {pf.status === 'success' && <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded w-full text-center font-medium">เสร็จสิ้น</span>}
+                        {pf.status === 'error' && <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded w-full text-center font-medium truncate" title={pf.errorMsg}>ล้มเหลว</span>}
+                      </div>
+                    </div>
                   </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
 
-                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                    {pendingFiles.map((item) => (
-                      <div key={item.id} className="flex gap-4 p-3 border border-gray-200 rounded-lg bg-gray-50 items-center">
-                        <img src={item.preview} className="w-16 h-16 object-cover rounded border border-gray-300" alt="preview" />
-                        
-                        <div className="flex-1">
-                          <p className="text-xs text-gray-500 mb-1 truncate max-w-[200px]">{item.file.name}</p>
+        {/* Bottom: Roster Section (Full Width) */}
+        <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">สถานะการส่งงาน (Roster)</h2>
+              <p className="text-sm text-gray-600">คลิกที่หมายเลขเพื่อดูผลตรวจและแก้ไขคะแนน (คลิกได้เฉพาะคนที่ส่งแล้ว)</p>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-gray-700 bg-gray-50 p-3 rounded-lg border border-gray-200">
+              <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-green-100 border border-green-300"></div> ตรวจแล้ว (มั่นใจสูง)</div>
+              <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300"></div> ตรวจแล้ว (ควรตรวจสอบซ้ำ)</div>
+              <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-blue-100 border border-blue-300"></div> แก้ไขคะแนนแล้วด้วยมือ</div>
+              <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-gray-50 border border-gray-200"></div> ยังไม่ส่งงาน (Missing)</div>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 xl:grid-cols-15 gap-2 md:gap-3">
+            {Array.from({ length: assignment.maxStudents }).map((_, i) => {
+              const num = i + 1;
+              const sub = submissions.find(s => s.studentNumber === num);
+              
+              if (sub) {
+                return (
+                  <button 
+                    key={num} 
+                    onClick={() => openReviewModal(sub)}
+                    className={`aspect-square flex items-center justify-center rounded-xl border-2 font-bold text-lg shadow-sm transition-transform hover:scale-105 ${getStatusColor(sub)}`}
+                  >
+                    {num}{sub.isOverridden ? <span className="text-blue-500 ml-0.5 text-sm">*</span> : ''}
+                  </button>
+                );
+              }
+              
+              // Pending File visual logic
+              const pFile = pendingFiles.find(p => parseInt(p.studentNo) === num);
+              if (pFile) {
+                return (
+                  <div key={num} className="aspect-square flex items-center justify-center rounded-xl border-2 border-blue-200 bg-blue-50/50 text-blue-400 font-bold text-lg shadow-inner">
+                    {pFile.status === 'processing' ? <Loader2 className="animate-spin text-blue-500" size={20}/> : num}
+                  </div>
+                );
+              }
+
+              // Missing
+              return (
+                <div key={num} className="aspect-square flex items-center justify-center rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-400 font-bold text-lg">
+                  {num}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+      </div>
+
+      {/* Teacher Review Modal */}
+      {selectedSub && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-200">
+            
+            {/* Modal Header */}
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                นักเรียนเลขที่ {selectedSub.studentNumber}
+                <span className={`text-xs px-2 py-1 rounded-full font-medium ${selectedSub.result?.needs_human_review ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
+                  AI มั่นใจ: {selectedSub.result?.ocr_confidence_percent || 0}%
+                </span>
+                {selectedSub.isOverridden && <span className="text-xs px-2 py-1 rounded-full font-medium bg-blue-100 text-blue-700">แก้ไขด้วยมือแล้ว</span>}
+              </h3>
+              <button onClick={() => setSelectedSub(null)} className="p-2 hover:bg-gray-200 rounded-full text-gray-500 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col lg:flex-row gap-6">
+              
+              {/* Left: Original Image */}
+              <div className="lg:w-1/2">
+                <h4 className="font-semibold text-gray-800 mb-3">กระดาษคำตอบต้นฉบับ</h4>
+                <div className="bg-gray-100 rounded-xl overflow-hidden border border-gray-200 relative group">
+                  <img src={selectedSub.imageUrl} alt="Exam" className="w-full h-auto object-contain max-h-[600px]" />
+                  <a href={selectedSub.imageUrl} target="_blank" rel="noreferrer" className="absolute top-2 right-2 bg-white/90 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-white">
+                    ดูรูปเต็ม
+                  </a>
+                </div>
+              </div>
+
+              {/* Right: AI Evaluation & Edit form */}
+              <div className="lg:w-1/2 space-y-6">
+                
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2 flex items-center justify-between">
+                    ข้อความที่อ่านได้ (สามารถแก้ไขได้)
+                  </h4>
+                  <textarea 
+                    value={editedText}
+                    onChange={(e) => setEditedText(e.target.value)}
+                    className="w-full bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-sm text-gray-900 font-serif leading-relaxed h-32 focus:ring-2 focus:ring-yellow-400 outline-none resize-y shadow-inner"
+                  />
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-3 border-b pb-2">รายละเอียดคะแนนรายข้อ</h4>
+                  <div className="space-y-3">
+                    {Object.entries(selectedSub.result?.evaluation || {}).map(([key, data]: [string, any]) => (
+                      <div key={key} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-2">
+                          <label className="text-sm font-bold text-gray-800">{key.replace('c', 'ข้อที่ ')}</label>
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">เลขที่:</span>
                             <input 
                               type="number"
-                              value={item.studentNo}
-                              onChange={e => updatePendingFile(item.id, { studentNo: e.target.value })}
-                              disabled={item.status === "processing" || item.status === "success"}
-                              placeholder="ระบุเลขที่"
-                              className="w-20 p-1 border border-gray-300 rounded text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-200"
+                              min={0}
+                              value={editedScores[key] ?? data.score}
+                              onChange={(e) => handleScoreChange(key, Number(e.target.value))}
+                              className="w-16 p-1 text-center border border-blue-300 rounded bg-blue-50 font-bold text-blue-700 outline-none focus:ring-2 focus:ring-blue-500"
                             />
+                            <span className="text-sm font-medium text-gray-500">คะแนน</span>
                           </div>
                         </div>
-
-                        <div className="w-40 flex flex-col items-end justify-center">
-                          {item.status === "pending" && <button onClick={() => removePendingFile(item.id)} className="text-sm text-red-500 hover:underline">ลบออก</button>}
-                          {item.status === "processing" && <span className="text-blue-500 flex items-center gap-1 text-sm"><Loader2 size={14} className="animate-spin"/> กำลังตรวจ</span>}
-                          {item.status === "success" && <span className="text-green-600 flex items-center gap-1 text-sm"><CheckCircle size={14}/> ตรวจสำเร็จ</span>}
-                          {item.status === "error" && (
-                            <div className="text-right">
-                              <span className="text-red-500 flex items-center justify-end gap-1 text-sm font-semibold"><AlertTriangle size={14}/> ผิดพลาด</span>
-                              <p className="text-xs text-red-400 mt-1 line-clamp-2 max-w-[150px]" title={item.errorMsg}>{item.errorMsg}</p>
-                            </div>
-                          )}
-                        </div>
+                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg leading-relaxed">{data.reason}</p>
                       </div>
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
-          </section>
 
-          {/* Right: Class Roster / Dashboard */}
-          <section className="lg:col-span-1">
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 sticky top-6">
-              <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                สถานะการส่งงาน ({submissions.length}/{assignment.maxStudents})
-              </h2>
-              <p className="text-sm text-gray-500 mb-4">คลิกที่เลขที่เพื่อดูผลการตรวจและแก้ไขคะแนน</p>
-              
-              <div className="grid grid-cols-5 gap-2">
-                {roster.map(studentNo => {
-                  const sub = submissions.find(s => s.studentNumber === studentNo);
-                  const isPending = pendingFiles.some(p => parseInt(p.studentNo) === studentNo && (p.status === 'pending' || p.status === 'processing'));
-                  
-                  let bgColor = "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"; // Missing
-                  if (sub) {
-                    const confidence = sub.result?.ocr_confidence_percent || 0;
-                    if (confidence >= 85) bgColor = "bg-green-100 text-green-700 border-green-300 font-bold hover:bg-green-200 cursor-pointer shadow-sm";
-                    else if (confidence >= 70) bgColor = "bg-yellow-100 text-yellow-700 border-yellow-300 font-bold hover:bg-yellow-200 cursor-pointer shadow-sm";
-                    else bgColor = "bg-red-100 text-red-700 border-red-300 font-bold hover:bg-red-200 cursor-pointer shadow-sm";
-                  } else if (isPending) {
-                    bgColor = "bg-blue-50 text-blue-500 border-blue-200 animate-pulse";
-                  }
-
-                  return (
-                    <div 
-                      key={studentNo} 
-                      onClick={() => sub && openReviewModal(sub)}
-                      className={`aspect-square flex items-center justify-center rounded-lg border text-sm transition-all ${bgColor}`}
-                      title={sub ? "คะแนนรวม: " + sub.result.total_raw_score : "ยังไม่ส่ง/ยังไม่ได้ตรวจ"}
-                    >
-                      {studentNo}
-                      {sub?.result?.is_overridden && <span className="absolute ml-5 -mt-5 text-[10px] text-blue-600 font-black">*</span>}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-6 space-y-2 text-xs text-gray-500">
-                <div className="flex items-center gap-2"><span className="w-3 h-3 bg-green-100 border border-green-300 rounded block"></span> ตรวจแล้ว (มั่นใจสูง)</div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 bg-yellow-100 border border-yellow-300 rounded block"></span> ตรวจแล้ว (ควรตรวจสอบซ้ำ)</div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 bg-blue-50 border border-blue-200 rounded block"></span> กำลังรอตรวจในคิว</div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 bg-gray-100 border border-gray-200 rounded block"></span> ยังไม่ส่งงาน (Missing)</div>
-              </div>
-            </div>
-          </section>
-
-        </div>
-      </div>
-
-      {/* Review & Override Modal */}
-      {selectedSub && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row">
-            
-            {/* Left: Original Image */}
-            <div className="w-full md:w-1/2 bg-gray-100 border-r border-gray-200 overflow-y-auto p-4 flex flex-col items-center max-h-[40vh] md:max-h-full relative">
-              <a href={selectedSub.imageUrl} target="_blank" rel="noreferrer" className="absolute top-6 right-6 bg-white/80 p-2 rounded shadow hover:bg-white text-sm font-medium">ดูรูปเต็ม</a>
-              <img src={selectedSub.imageUrl} alt="กระดาษคำตอบ" className="w-full h-auto rounded-lg shadow-sm" />
-            </div>
-
-            {/* Right: AI Analysis & Score Override */}
-            <div className="w-full md:w-1/2 flex flex-col h-full bg-white max-h-[50vh] md:max-h-full">
-              
-              {/* Modal Header */}
-              <div className="flex items-center justify-between p-6 border-b border-gray-100">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-800">นักเรียนเลขที่ {selectedSub.studentNumber}</h2>
-                  <p className="text-sm text-gray-500">AI มั่นใจในการอ่าน: {selectedSub.result.ocr_confidence_percent}%</p>
+                <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 flex justify-between items-center">
+                  <h4 className="font-bold text-gray-900">คะแนนรวมสุทธิ:</h4>
+                  <span className="text-2xl font-bold text-blue-700">{calculateNewTotal()} คะแนน</span>
                 </div>
-                <button onClick={() => setSelectedSub(null)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full text-gray-600 transition-colors">
-                  <X size={20} />
+
+                <button 
+                  onClick={saveOverride}
+                  disabled={isSavingOverride}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm disabled:opacity-50"
+                >
+                  {isSavingOverride ? <Loader2 className="animate-spin" /> : <Save size={18} />}
+                  บันทึกผลการประเมิน
                 </button>
+
               </div>
-
-              {/* Modal Body */}
-              <div className="p-6 overflow-y-auto flex-1 space-y-6">
-                
-                <div>
-                  <h3 className="font-semibold text-gray-800 mb-2 border-b pb-1">ข้อความที่ AI อ่านได้</h3>
-                  <div className="bg-gray-50 p-4 rounded-lg text-sm text-gray-700 whitespace-pre-wrap border border-gray-100 font-serif leading-relaxed">
-                    {selectedSub.result.transcribed_text || "อ่านข้อความไม่ออก"}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-gray-800 mb-2 border-b pb-1">รายละเอียดคะแนนรายข้อ</h3>
-                  <div className="space-y-3">
-                    {Object.entries(selectedSub.result.evaluation || {}).map(([key, value]: [string, any]) => {
-                      const criteriaName = assignment.rubricData?.criteria?.find((c:any) => c.id === key)?.name || key;
-                      return (
-                        <div key={key} className="bg-blue-50/50 p-3 rounded-lg border border-blue-100 text-sm">
-                          <div className="flex justify-between font-medium text-gray-800 mb-1">
-                            <span>{criteriaName}</span>
-                            <span className="text-blue-700">{value.score} คะแนน</span>
-                          </div>
-                          <p className="text-gray-600 text-xs">{value.reason}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-                
-                {selectedSub.result.teacher_feedback && (
-                  <div>
-                    <h3 className="font-semibold text-gray-800 mb-2 border-b pb-1">คำแนะนำจาก AI</h3>
-                    <p className="text-sm text-gray-600 italic bg-amber-50 p-3 rounded border border-amber-100">
-                      "{selectedSub.result.teacher_feedback}"
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Modal Footer - Score Override */}
-              <div className="p-6 border-t border-gray-100 bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">แก้ไขคะแนนรวม (ถ้า AI ตรวจพลาด)</label>
-                    <div className="flex items-center gap-3">
-                      <input 
-                        type="number" 
-                        value={overrideScore}
-                        onChange={(e) => setOverrideScore(Number(e.target.value))}
-                        className="w-24 p-2 border border-gray-300 rounded-lg text-lg font-bold text-center focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                      <span className="text-gray-500">
-                        / {assignment.rubricData?.criteria?.reduce((acc:number, c:any) => acc + c.max_score, 0) || "?"} คะแนน
-                      </span>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={handleSaveOverride}
-                    disabled={isSavingOverride || overrideScore === selectedSub.result.total_raw_score}
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isSavingOverride ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                    บันทึกคะแนน
-                  </button>
-                </div>
-                {selectedSub.result.is_overridden && (
-                  <p className="text-xs text-blue-600 mt-2">* คะแนนนี้ถูกแก้ไขโดยครูแล้ว</p>
-                )}
-              </div>
-
             </div>
+
           </div>
         </div>
       )}

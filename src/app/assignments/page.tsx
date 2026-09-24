@@ -3,26 +3,26 @@
 import { useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, addDoc, getDocs, query, where, orderBy } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus, FileText, ArrowRight, Folder } from "lucide-react";
+import { Loader2, Plus, Folder, FileText, ArrowRight, Trash2 } from "lucide-react";
 import Link from "next/link";
 
-export default function AssignmentsPage() {
+export default function AssignmentsHubPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  
+
   const [rubrics, setRubrics] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   
-  const [isCreating, setIsCreating] = useState(false);
   const [newAssignment, setNewAssignment] = useState({
     title: "",
     className: "",
     rubricId: "",
     maxStudents: 40
   });
+  const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -40,23 +40,24 @@ export default function AssignmentsPage() {
     try {
       // Fetch Rubrics
       const rubricsSnap = await getDocs(query(collection(db, "rubrics"), where("createdBy", "==", uid)));
-      const rubricsData = rubricsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setRubrics(rubricsData);
+      setRubrics(rubricsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       // Fetch Assignments
-      const assignSnap = await getDocs(query(collection(db, "assignments"), where("createdBy", "==", uid)));
-      const assignData = assignSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Sort client side since we might need a composite index for orderBy
-      assignData.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setAssignments(assignData);
+      const assignmentsSnap = await getDocs(query(collection(db, "assignments"), where("createdBy", "==", uid)));
+      const assignmentsData = assignmentsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // Sort assignments by createdAt descending
+      assignmentsData.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      setAssignments(assignmentsData);
     } catch (error) {
-      console.error("Error fetching data", error);
+      console.error("Error fetching data:", error);
     }
   };
 
   const handleCreateAssignment = async () => {
     if (!newAssignment.title || !newAssignment.className || !newAssignment.rubricId) {
-      alert("กรุณากรอกข้อมูลให้ครบถ้วน");
+      alert("กรุณากรอกข้อมูลให้ครบถ้วน และเลือกเกณฑ์ประเมิน");
       return;
     }
 
@@ -65,7 +66,10 @@ export default function AssignmentsPage() {
       const selectedRubric = rubrics.find(r => r.id === newAssignment.rubricId);
       
       const docRef = await addDoc(collection(db, "assignments"), {
-        ...newAssignment,
+        title: newAssignment.title,
+        className: newAssignment.className,
+        maxStudents: newAssignment.maxStudents,
+        rubricId: newAssignment.rubricId,
         rubricData: selectedRubric, // Store a snapshot of the rubric
         createdBy: user.uid,
         createdAt: new Date().toISOString(),
@@ -74,8 +78,21 @@ export default function AssignmentsPage() {
       // Redirect to the batch upload workspace for this assignment
       router.push(`/assignments/${docRef.id}`);
     } catch (error: any) {
-      alert("สร้างชิ้นงานล้มเหลว: " + error.message);
+      alert("สร้างชิ้นงานไม่สำเร็จ : " + error.message);
       setIsCreating(false);
+    }
+  };
+
+  const handleDeleteAssignment = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm("คุณต้องการลบชิ้นงานนี้ใช่หรือไม่? (การกระทำนี้ไม่สามารถกู้คืนได้)")) return;
+    
+    try {
+      await deleteDoc(doc(db, "assignments", id));
+      setAssignments(prev => prev.filter(a => a.id !== id));
+    } catch (error: any) {
+      alert("ลบชิ้นงานไม่สำเร็จ: " + error.message);
     }
   };
 
@@ -102,38 +119,40 @@ export default function AssignmentsPage() {
             </h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อชิ้นงาน (เช่น สอบกลางภาค)</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">ชื่อชิ้นงาน (เช่น สอบกลางภาค)</label>
                 <input 
                   type="text" 
                   value={newAssignment.title}
                   onChange={e => setNewAssignment({...newAssignment, title: e.target.value})}
-                  className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 font-medium placeholder:text-gray-400"
+                  placeholder="พิมพ์ชื่อชิ้นงาน..."
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ห้องเรียน (เช่น ม.6/1)</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">ห้องเรียน (เช่น ม.6/1)</label>
                 <input 
                   type="text" 
                   value={newAssignment.className}
                   onChange={e => setNewAssignment({...newAssignment, className: e.target.value})}
-                  className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 font-medium placeholder:text-gray-400"
+                  placeholder="พิมพ์ชื่อห้องเรียน..."
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนนักเรียนในห้อง</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">จำนวนนักเรียนในห้อง</label>
                 <input 
                   type="number" 
                   value={newAssignment.maxStudents}
                   onChange={e => setNewAssignment({...newAssignment, maxStudents: Number(e.target.value)})}
-                  className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 font-medium"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">เลือกเกณฑ์ประเมิน (Rubric)</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">เลือกเกณฑ์ประเมิน (Rubric)</label>
                 <select 
                   value={newAssignment.rubricId}
                   onChange={e => setNewAssignment({...newAssignment, rubricId: e.target.value})}
-                  className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 font-medium"
                 >
                   <option value="">-- เลือกเกณฑ์ประเมิน --</option>
                   {rubrics.map(r => (
@@ -147,7 +166,7 @@ export default function AssignmentsPage() {
               <button 
                 onClick={handleCreateAssignment}
                 disabled={isCreating}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 mt-4 transition-colors disabled:opacity-50"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 mt-4 transition-colors disabled:opacity-50 shadow-sm"
               >
                 {isCreating ? <Loader2 className="animate-spin" /> : "สร้างชิ้นงานและเริ่มตรวจ"}
               </button>
@@ -168,17 +187,28 @@ export default function AssignmentsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {assignments.map(assignment => (
                   <Link href={`/assignments/${assignment.id}`} key={assignment.id} className="block group">
-                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all h-full flex flex-col">
+                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all h-full flex flex-col relative overflow-hidden">
                       <div className="flex justify-between items-start mb-2">
-                        <h3 className="font-bold text-gray-800 text-lg group-hover:text-blue-600 transition-colors line-clamp-1">{assignment.title}</h3>
-                        <span className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded-full">{assignment.className}</span>
+                        <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-600 transition-colors line-clamp-1 pr-8">{assignment.title}</h3>
+                        <span className="bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full font-medium border border-gray-200">{assignment.className}</span>
                       </div>
-                      <p className="text-sm text-gray-500 flex items-center gap-1 mb-4 line-clamp-1">
+                      
+                      {/* Delete Button */}
+                      <button 
+                        onClick={(e) => handleDeleteAssignment(assignment.id, e)}
+                        className="absolute top-4 right-4 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white rounded-full"
+                        title="ลบชิ้นงานนี้"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+
+                      <p className="text-sm text-gray-600 flex items-center gap-1 mb-4 line-clamp-1 font-medium">
                         <FileText size={14}/> {assignment.rubricData?.title || 'ไม่มีชื่อเกณฑ์'}
                       </p>
+                      
                       <div className="mt-auto pt-4 border-t border-gray-100 flex items-center justify-between text-sm">
-                        <span className="text-gray-500">นักเรียนทั้งหมด {assignment.maxStudents} คน</span>
-                        <span className="text-blue-600 font-medium flex items-center gap-1">เข้าไปตรวจงาน <ArrowRight size={16}/></span>
+                        <span className="text-gray-500 font-medium">นักเรียนทั้งหมด {assignment.maxStudents} คน</span>
+                        <span className="text-blue-600 font-bold flex items-center gap-1">เข้าไปตรวจงาน <ArrowRight size={16}/></span>
                       </div>
                     </div>
                   </Link>
