@@ -25,7 +25,7 @@ export default function RubricsBuilderPage() {
   const emptyRubric = {
     title: "",
     description: "",
-    criteria: [] as { id: string, name: string, max_score: number, description: string }[]
+    criteria: [] as { id: string, name: string, raw_score: number, weight: number, max_score: number, description: string }[]
   };
 
   const [rubric, setRubric] = useState(emptyRubric);
@@ -80,10 +80,20 @@ export default function RubricsBuilderPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
 
+      // Ensure mapping handles both old and new schema
+      const mappedCriteria = data.criteria?.map((c: any) => ({
+        id: c.id || Date.now().toString() + Math.random(),
+        name: c.name || "",
+        raw_score: c.raw_score || c.max_score || 5,
+        weight: c.weight || 1,
+        max_score: c.max_score || 5,
+        description: c.description || ""
+      })) || [];
+
       setRubric({
         title: data.title || "",
         description: data.description || "",
-        criteria: data.criteria || []
+        criteria: mappedCriteria
       });
       
     } catch (error: any) {
@@ -101,14 +111,12 @@ export default function RubricsBuilderPage() {
     setIsSaving(true);
     try {
       if (selectedRubricId) {
-        // Update existing
         await updateDoc(doc(db, "rubrics", selectedRubricId), {
           ...rubric,
           updatedAt: new Date().toISOString()
         });
         alert("อัปเดตเกณฑ์ประเมินสำเร็จ!");
       } else {
-        // Create new
         await addDoc(collection(db, "rubrics"), {
           ...rubric,
           createdBy: user.uid,
@@ -116,7 +124,6 @@ export default function RubricsBuilderPage() {
         });
         alert("บันทึกเกณฑ์ประเมินใหม่สำเร็จ!");
       }
-      // Refresh list and reset
       await fetchRubrics(user.uid);
       setRubric(emptyRubric);
       setSelectedRubricId(null);
@@ -129,7 +136,15 @@ export default function RubricsBuilderPage() {
   };
 
   const loadRubricForEdit = (r: any) => {
-    setRubric({ title: r.title, description: r.description, criteria: r.criteria });
+    // Map older data that might not have raw_score or weight
+    const mappedCriteria = r.criteria?.map((c: any) => ({
+        ...c,
+        raw_score: c.raw_score || c.max_score || 5,
+        weight: c.weight || 1,
+        max_score: c.max_score || 5
+    })) || [];
+    
+    setRubric({ title: r.title, description: r.description, criteria: mappedCriteria });
     setSelectedRubricId(r.id);
     setFile(null);
     setPreviewUrl(null);
@@ -173,7 +188,7 @@ export default function RubricsBuilderPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           
-          {/* Sidebar: List of Rubrics */}
+          {/* Sidebar */}
           <section className="lg:col-span-1 bg-white p-4 rounded-xl shadow-sm border border-gray-100 h-fit max-h-[80vh] overflow-y-auto">
             <h2 className="font-semibold text-gray-800 mb-4 flex items-center gap-2 border-b pb-2">
               <FileText size={18} className="text-blue-600" /> เกณฑ์ของคุณ
@@ -208,10 +223,9 @@ export default function RubricsBuilderPage() {
             </div>
           </section>
 
-          {/* Main Area: Extractor & Builder */}
+          {/* Main Area */}
           <div className="lg:col-span-3 space-y-6">
             
-            {/* Auto Extractor (Only show when creating new) */}
             {!selectedRubricId && (
               <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-6 items-center">
                 <div className="flex-1 space-y-2">
@@ -244,7 +258,6 @@ export default function RubricsBuilderPage() {
               </section>
             )}
 
-            {/* Builder Form Column */}
             <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="font-semibold text-gray-800 text-lg">
@@ -260,7 +273,7 @@ export default function RubricsBuilderPage() {
                     type="text" 
                     value={rubric.title} 
                     onChange={e => setRubric({...rubric, title: e.target.value})}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-semibold"
                     placeholder="พิมพ์ชื่อชุดเกณฑ์..."
                   />
                 </div>
@@ -270,7 +283,7 @@ export default function RubricsBuilderPage() {
                   <textarea 
                     value={rubric.description}
                     onChange={e => setRubric({...rubric, description: e.target.value})}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none"
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none text-gray-900 font-medium"
                     placeholder="เช่น นักเรียนต้องเขียน 12-15 บรรทัด ตัวบรรจงครึ่งบรรทัด..."
                     rows={2}
                   />
@@ -304,23 +317,51 @@ export default function RubricsBuilderPage() {
                               newC[index].name = e.target.value;
                               setRubric({...rubric, criteria: newC});
                             }}
-                            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
+                            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white text-gray-900 font-semibold"
                           />
                         </div>
-                        <div className="w-full md:w-32 flex-shrink-0">
-                          <label className="block text-xs font-medium text-gray-600 mb-1">คะแนนเต็มรวมน้ำหนัก</label>
+                        
+                        <div className="w-full md:w-24 flex-shrink-0">
+                          <label className="block text-xs font-medium text-gray-600 mb-1">คะแนนดิบเต็ม</label>
+                          <input 
+                            type="number" 
+                            value={criterion.raw_score || criterion.max_score}
+                            onChange={e => {
+                              const newC = [...rubric.criteria];
+                              newC[index].raw_score = Number(e.target.value);
+                              newC[index].max_score = newC[index].raw_score * (newC[index].weight || 1);
+                              setRubric({...rubric, criteria: newC});
+                            }}
+                            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-gray-900 bg-white"
+                          />
+                        </div>
+
+                        <div className="w-full md:w-20 flex-shrink-0">
+                          <label className="block text-xs font-medium text-gray-600 mb-1">น้ำหนัก</label>
+                          <input 
+                            type="number" 
+                            value={criterion.weight || 1}
+                            onChange={e => {
+                              const newC = [...rubric.criteria];
+                              newC[index].weight = Number(e.target.value);
+                              newC[index].max_score = (newC[index].raw_score || 5) * newC[index].weight;
+                              setRubric({...rubric, criteria: newC});
+                            }}
+                            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-gray-900 bg-white"
+                          />
+                        </div>
+
+                        <div className="w-full md:w-24 flex-shrink-0">
+                          <label className="block text-xs font-medium text-gray-600 mb-1">คะแนนรวม (x)</label>
                           <input 
                             type="number" 
                             value={criterion.max_score}
-                            onChange={e => {
-                              const newC = [...rubric.criteria];
-                              newC[index].max_score = Number(e.target.value);
-                              setRubric({...rubric, criteria: newC});
-                            }}
-                            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold text-blue-600 bg-white"
+                            disabled
+                            className="w-full p-2 border border-blue-200 rounded-lg outline-none text-sm font-bold text-blue-700 bg-blue-50 cursor-not-allowed text-center"
                           />
                         </div>
                       </div>
+                      
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">อธิบายวิธีการคิดคะแนน / เกณฑ์ย่อยให้ AI เข้าใจอย่างละเอียด</label>
                         <textarea 
@@ -331,7 +372,7 @@ export default function RubricsBuilderPage() {
                             setRubric({...rubric, criteria: newC});
                           }}
                           rows={4}
-                          className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-y bg-white font-mono leading-relaxed text-gray-700"
+                          className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-y bg-white font-mono leading-relaxed text-gray-900 font-medium"
                         />
                       </div>
                     </div>
@@ -341,7 +382,7 @@ export default function RubricsBuilderPage() {
                 <button 
                   onClick={() => setRubric({
                     ...rubric, 
-                    criteria: [...rubric.criteria, { id: Date.now().toString(), name: "", max_score: 5, description: "" }]
+                    criteria: [...rubric.criteria, { id: Date.now().toString(), name: "", raw_score: 5, weight: 1, max_score: 5, description: "" }]
                   })}
                   className="w-full py-3 border-2 border-dashed border-blue-200 text-blue-600 rounded-xl hover:bg-blue-50 flex items-center justify-center gap-2 text-sm font-medium transition-colors mt-2"
                 >

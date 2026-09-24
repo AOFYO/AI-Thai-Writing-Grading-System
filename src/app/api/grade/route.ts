@@ -16,8 +16,11 @@ export async function POST(req: Request) {
     
     if (rubricData && rubricData.criteria) {
       const criteriaText = rubricData.criteria
-        .map((c: any) => `- ${c.name} (คะแนนเต็ม ${c.max_score}): ${c.description}`)
-        .join('\n');
+        .map((c: any) => {
+          const weightInfo = c.weight ? ` | น้ำหนัก x${c.weight} | คะแนนเต็มรวม ${c.max_score}` : ` | คะแนนเต็ม ${c.max_score}`;
+          return `- ${c.name} (คะแนนดิบสูงสุด ${c.raw_score || c.max_score}${weightInfo}):\n  คำชี้แจง: ${c.description}`;
+        })
+        .join('\n\n');
         
       const jsonSchemaEval = rubricData.criteria
         .map((c: any) => `"${c.id}": {"score": 0, "reason": ""}`)
