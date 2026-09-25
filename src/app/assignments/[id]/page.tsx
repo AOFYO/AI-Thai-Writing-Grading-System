@@ -822,7 +822,7 @@ export default function AssignmentWorkspace() {
                       const criteriaDef = assignment.rubricData?.criteria?.find((c:any) => c.id === key);
                       const weight = criteriaDef?.weight || 1;
                       const maxRaw = criteriaDef?.raw_score || criteriaDef?.max_score || 0;
-                      const currentRaw = editedScores[key] ?? ((data.score || 0) / weight) ?? 0;
+                      const currentRaw = editedScores[key] ?? ((data.score || 0) / weight);
                       const totalSubScore = currentRaw * weight;
 
                       return (
