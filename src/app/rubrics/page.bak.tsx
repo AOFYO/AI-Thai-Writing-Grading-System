@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { auth, db } from "@/lib/firebase";
-import { useUserRole } from "@/hooks/useUserRole";
-import { Copy } from "lucide-react";
+import { onAuthStateChanged } from "firebase/auth";
 import { collection, addDoc, updateDoc, doc, getDocs, query, where, deleteDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Trash2, Save, FileText, Upload, ArrowLeft } from "lucide-react";
@@ -11,7 +10,8 @@ import Link from "next/link";
 
 export default function RubricsBuilderPage() {
   const router = useRouter();
-  const { user, userData, loading: authChecking } = useUserRole();
+  const [user, setUser] = useState<any>(null);
+  const [authChecking, setAuthChecking] = useState(true);
   
   const [myRubrics, setMyRubrics] = useState<any[]>([]);
   const [selectedRubricId, setSelectedRubricId] = useState<string | null>(null);
@@ -31,23 +31,20 @@ export default function RubricsBuilderPage() {
   const [rubric, setRubric] = useState(emptyRubric);
 
   useEffect(() => {
-    if (!authChecking) {
-      if (!user) router.push("/login");
-      else if (userData?.role === "guest") router.push("/pending-approval");
-      else fetchRubrics();
-    }
-  }, [user, userData, authChecking, router]);
-
-  const fetchRubrics = async () => {
-    const snap = await getDocs(query(collection(db, "rubrics")));
-    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    data.sort((a: any, b: any) => {
-      const aIsAdmin = !a.createdBy || a.creatorRole === 'admin';
-      const bIsAdmin = !b.createdBy || b.creatorRole === 'admin';
-      if (aIsAdmin && !bIsAdmin) return -1;
-      if (!aIsAdmin && bIsAdmin) return 1;
-      return 0;
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) router.push("/login");
+      else {
+        setUser(currentUser);
+        fetchRubrics(currentUser.uid);
+      }
+      setAuthChecking(false);
     });
+    return () => unsubscribe();
+  }, [router]);
+
+  const fetchRubrics = async (uid: string) => {
+    const snap = await getDocs(query(collection(db, "rubrics"), where("createdBy", "==", uid)));
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     setMyRubrics(data);
   };
 
@@ -123,7 +120,6 @@ export default function RubricsBuilderPage() {
         await addDoc(collection(db, "rubrics"), {
           ...rubric,
           createdBy: user.uid,
-          creatorRole: userData?.role || 'teacher',
           createdAt: new Date().toISOString(),
         });
         alert("บันทึกเกณฑ์ประเมินใหม่สำเร็จ!");
@@ -140,12 +136,6 @@ export default function RubricsBuilderPage() {
   };
 
   const loadRubricForEdit = (r: any) => {
-    const canEdit = r.createdBy === user?.uid || userData?.role === 'admin' || (!r.createdBy && userData?.role === 'admin');
-    if (!canEdit) {
-      alert("คุณไม่มีสิทธิแก้ไขเกณฑ์นี้ (กรุณากด 'ทำสำเนา' แทน)");
-      return;
-    }
-  
     // Map older data that might not have raw_score or weight
     const mappedCriteria = r.criteria?.map((c: any) => ({
         ...c,

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { auth, db } from "@/lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
+import { useUserRole } from "@/hooks/useUserRole";
 import { doc, getDoc, collection, addDoc, updateDoc, getDocs, query, where } from "firebase/firestore";
 import { useRouter, useParams } from "next/navigation";
 import { Loader2, ArrowLeft, UploadCloud, Play, CheckCircle, AlertTriangle, Download, X, Save, Sparkles, BrainCircuit, FileText, RefreshCw, ZoomIn } from "lucide-react";
@@ -23,8 +23,7 @@ export default function AssignmentWorkspace() {
   const params = useParams();
   const assignmentId = params?.id as string;
   
-  const [user, setUser] = useState<any>(null);
-  const [authChecking, setAuthChecking] = useState(true);
+  const { user, userData, loading: authChecking } = useUserRole();
   
   const [assignment, setAssignment] = useState<any>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
@@ -123,6 +122,7 @@ export default function AssignmentWorkspace() {
         name,
         prompt: textToSave,
         createdBy: user.uid,
+        creatorRole: userData?.role || 'teacher',
         createdAt: new Date().toISOString()
       };
       const docRef = await addDoc(collection(db, "ai_skills"), newSkill);

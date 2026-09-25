@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
+import { useUserRole } from "@/hooks/useUserRole";
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Folder, FileText, ArrowRight, Trash2 } from "lucide-react";
@@ -10,8 +10,7 @@ import Link from "next/link";
 
 export default function AssignmentsHubPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [authChecking, setAuthChecking] = useState(true);
+  const { user, userData, loading: authChecking } = useUserRole();
 
   const [rubrics, setRubrics] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
@@ -25,16 +24,15 @@ export default function AssignmentsHubPage() {
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!currentUser) router.push("/login");
+    if (!authChecking) {
+      if (!user) router.push("/login");
+      else if (userData?.role === "guest") router.push("/pending-approval");
       else {
-        setUser(currentUser);
-        fetchData(currentUser.uid);
+        fetchRubrics();
+        fetchAssignments(user.uid);
       }
-      setAuthChecking(false);
-    });
-    return () => unsubscribe();
-  }, [router]);
+    }
+  }, [user, userData, authChecking, router]);
 
   const fetchData = async (uid: string) => {
     try {
