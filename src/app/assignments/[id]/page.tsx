@@ -818,7 +818,13 @@ export default function AssignmentWorkspace() {
                 <div>
                   <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">รายละเอียดคะแนนรายข้อ <span className="text-sm font-normal text-gray-500">(ระบบคำนวณคะแนนรวมให้อัตโนมัติ)</span></h4>
                   <div className="space-y-4">
-                    {Object.entries(selectedSub.result?.evaluation || {}).map(([key, data]: [string, any]) => {
+                    {Object.entries(selectedSub.result?.evaluation || {})
+                      .sort(([keyA], [keyB]) => {
+                        const numA = parseInt(keyA.replace(/\D/g, '')) || 0;
+                        const numB = parseInt(keyB.replace(/\D/g, '')) || 0;
+                        return numA - numB;
+                      })
+                      .map(([key, data]: [string, any]) => {
                       const criteriaDef = assignment.rubricData?.criteria?.find((c:any) => c.id === key);
                       const weight = criteriaDef?.weight || 1;
                       const maxRaw = criteriaDef?.raw_score || criteriaDef?.max_score || 0;
