@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, collection, addDoc, updateDoc, getDocs, query, where } from "firebase/firestore";
 import { useRouter, useParams } from "next/navigation";
-import { Loader2, ArrowLeft, UploadCloud, CheckCircle, AlertTriangle, Download, X, Save, Sparkles, BrainCircuit, FileText, Play } from "lucide-react";
+import { Loader2, ArrowLeft, UploadCloud, Play, CheckCircle, AlertTriangle, Download, X, Save, Sparkles, BrainCircuit, FileText, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 interface PendingFile {
@@ -41,9 +41,11 @@ export default function AssignmentWorkspace() {
 
   // Review Modal State
   const [selectedSub, setSelectedSub] = useState<any>(null);
+  const [originalAiText, setOriginalAiText] = useState("");
   const [editedText, setEditedText] = useState("");
   const [editedScores, setEditedScores] = useState<any>({});
   const [isSavingOverride, setIsSavingOverride] = useState(false);
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -223,12 +225,11 @@ export default function AssignmentWorkspace() {
         updatePendingFile(item.id, { status: "success", result: gradeData });
         setSubmissions(prev => [...prev.filter(s => s.studentNumber !== newSub.studentNumber), { id: subRef.id, ...newSub }]); 
         
-        // Wait 3 seconds to avoid Gemini Free Tier rate limits
         await new Promise(r => setTimeout(r, 3000));
         
       } catch (err: any) {
         updatePendingFile(item.id, { status: "error", errorMsg: err.message });
-        break; // Stop loop on error
+        break;
       }
     }
     
@@ -236,9 +237,9 @@ export default function AssignmentWorkspace() {
   };
 
   const getStatusColor = (sub: any) => {
-    if (sub.isOverridden) return "bg-blue-100 text-blue-700 border-blue-300"; // overridden
-    if (sub.result?.needs_human_review) return "bg-yellow-100 text-yellow-700 border-yellow-300"; // unsure
-    return "bg-green-100 text-green-700 border-green-300"; // solid
+    if (sub.isOverridden) return "bg-blue-100 text-blue-700 border-blue-300";
+    if (sub.result?.needs_human_review) return "bg-yellow-100 text-yellow-700 border-yellow-300";
+    return "bg-green-100 text-green-700 border-green-300";
   };
 
   const exportCSV = () => {
@@ -268,9 +269,10 @@ export default function AssignmentWorkspace() {
 
   const openReviewModal = (sub: any) => {
     setSelectedSub(sub);
-    setEditedText(sub.result?.transcribed_text || "");
+    const rawAiText = sub.result?.transcribed_text || "";
+    setOriginalAiText(rawAiText);
+    setEditedText(rawAiText.replace(/<\/?unsure>/g, ''));
     
-    // Initialize editedScores with current evaluation scores
     const initialScores: any = {};
     if (sub.result?.evaluation) {
       Object.keys(sub.result.evaluation).forEach(k => {
@@ -285,7 +287,12 @@ export default function AssignmentWorkspace() {
   };
 
   const calculateNewTotal = () => {
-    return Object.values(editedScores).reduce((acc: number, curr: any) => acc + Number(curr), 0);
+    if (!assignment?.rubricData?.criteria) return 0;
+    return Object.keys(editedScores).reduce((acc: number, key: string) => {
+      const criteriaDef = assignment.rubricData.criteria.find((c:any) => c.id === key);
+      const weight = criteriaDef?.weight || 1;
+      return acc + (Number(editedScores[key]) * weight);
+    }, 0);
   };
 
   const saveOverride = async () => {
@@ -294,9 +301,8 @@ export default function AssignmentWorkspace() {
     try {
       const newTotal = calculateNewTotal();
       
-      // Update local state deeply
       const updatedResult = { ...selectedSub.result };
-      updatedResult.transcribed_text = editedText;
+      updatedResult.transcribed_text = editedText; // Save the cleaned, edited text
       updatedResult.total_raw_score = newTotal;
       if (updatedResult.evaluation) {
         Object.keys(editedScores).forEach(k => {
@@ -320,6 +326,88 @@ export default function AssignmentWorkspace() {
     }
     setIsSavingOverride(false);
   };
+
+  const handleReanalyzeText = async () => {
+    if (!selectedSub || !editedText.trim()) return;
+    setIsReanalyzing(true);
+    try {
+      const res = await fetch("/api/grade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          overrideText: editedText,
+          rubricData: assignment.rubricData,
+          customStylePrompt: activeSkillText
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "วิเคราะห์ใหม่ล้มเหลว");
+
+      // Update local state with new AI result
+      const newSubData = { ...selectedSub, result: data };
+      setSelectedSub(newSubData);
+      
+      const initialScores: any = {};
+      if (data.evaluation) {
+        Object.keys(data.evaluation).forEach(k => {
+          initialScores[k] = data.evaluation[k].score || 0;
+        });
+      }
+      setEditedScores(initialScores);
+      alert("AI วิเคราะห์คะแนนใหม่จากข้อความที่แก้ไขเสร็จสมบูรณ์");
+
+    } catch (err: any) {
+      alert(err.message);
+    }
+    setIsReanalyzing(false);
+  };
+
+  // -------------------------
+  // Live Diff Preview Logic
+  // -------------------------
+  const renderLiveDiff = () => {
+    if (typeof Intl === 'undefined' || !Intl.Segmenter) {
+      // Fallback for browsers without Intl.Segmenter
+      return <div className="text-gray-700">{editedText}</div>;
+    }
+
+    try {
+      const segmenter = new Intl.Segmenter('th', { granularity: 'word' });
+      const cleanOriginal = originalAiText.replace(/<\/?unsure>/g, '');
+      
+      const oldWordsSet = new Set(Array.from(segmenter.segment(cleanOriginal)).map(s => s.segment));
+      
+      // Extract unsure words directly from tags to a Set
+      const unsureMatches = originalAiText.match(/<unsure>(.*?)<\/unsure>/g) || [];
+      const unsureWordsSet = new Set(unsureMatches.map(s => s.replace(/<\/?unsure>/g, '')));
+
+      const segments = Array.from(segmenter.segment(editedText));
+      
+      return (
+        <div className="text-gray-800 leading-relaxed font-serif whitespace-pre-wrap">
+          {segments.map((seg, idx) => {
+            const w = seg.segment;
+            if (w.trim() === '') return <span key={idx}>{w}</span>; // Keep whitespace normal
+            
+            if (!oldWordsSet.has(w)) {
+              // Word is entirely new or modified by teacher -> Green
+              return <span key={idx} className="bg-green-100 text-green-700 font-bold px-0.5 rounded">{w}</span>;
+            }
+            if (unsureWordsSet.has(w)) {
+              // Word is from original AI and was marked unsure -> Red
+              return <span key={idx} className="bg-red-100 text-red-600 font-bold px-0.5 rounded">{w}</span>;
+            }
+            
+            // Normal word
+            return <span key={idx}>{w}</span>;
+          })}
+        </div>
+      );
+    } catch (e) {
+      return <div className="text-gray-700">{editedText}</div>;
+    }
+  };
+
 
   if (authChecking || !user || !assignment) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" /></div>;
 
@@ -458,19 +546,19 @@ export default function AssignmentWorkspace() {
           )}
         </section>
 
-        {/* Bottom: Roster Section (Full Width) */}
+        {/* Bottom: Roster Section */}
         <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
             <div>
               <h2 className="text-lg font-bold text-gray-900">สถานะการส่งงาน (Roster)</h2>
-              <p className="text-sm text-gray-600">คลิกที่หมายเลขเพื่อดูผลตรวจและแก้ไขคะแนน (คลิกได้เฉพาะคนที่ส่งแล้ว)</p>
+              <p className="text-sm text-gray-600">คลิกที่หมายเลขเพื่อดูผลตรวจและแก้ไขคะแนน</p>
             </div>
             
             <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-gray-700 bg-gray-50 p-3 rounded-lg border border-gray-200">
               <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-green-100 border border-green-300"></div> ตรวจแล้ว (มั่นใจสูง)</div>
               <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300"></div> ตรวจแล้ว (ควรตรวจสอบซ้ำ)</div>
               <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-blue-100 border border-blue-300"></div> แก้ไขคะแนนแล้วด้วยมือ</div>
-              <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-gray-50 border border-gray-200"></div> ยังไม่ส่งงาน (Missing)</div>
+              <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-gray-50 border border-gray-200"></div> ยังไม่ส่งงาน</div>
             </div>
           </div>
           
@@ -491,7 +579,6 @@ export default function AssignmentWorkspace() {
                 );
               }
               
-              // Pending File visual logic
               const pFile = pendingFiles.find(p => parseInt(p.studentNo) === num);
               if (pFile) {
                 return (
@@ -501,7 +588,6 @@ export default function AssignmentWorkspace() {
                 );
               }
 
-              // Missing
               return (
                 <div key={num} className="aspect-square flex items-center justify-center rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-400 font-bold text-lg">
                   {num}
@@ -516,7 +602,7 @@ export default function AssignmentWorkspace() {
       {/* Teacher Review Modal */}
       {selectedSub && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-200">
             
             {/* Modal Header */}
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
@@ -536,10 +622,10 @@ export default function AssignmentWorkspace() {
             <div className="flex-1 overflow-y-auto p-6 flex flex-col lg:flex-row gap-6">
               
               {/* Left: Original Image */}
-              <div className="lg:w-1/2">
+              <div className="lg:w-5/12">
                 <h4 className="font-semibold text-gray-800 mb-3">กระดาษคำตอบต้นฉบับ</h4>
                 <div className="bg-gray-100 rounded-xl overflow-hidden border border-gray-200 relative group">
-                  <img src={selectedSub.imageUrl} alt="Exam" className="w-full h-auto object-contain max-h-[600px]" />
+                  <img src={selectedSub.imageUrl} alt="Exam" className="w-full h-auto object-contain max-h-[70vh]" />
                   <a href={selectedSub.imageUrl} target="_blank" rel="noreferrer" className="absolute top-2 right-2 bg-white/90 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-white">
                     ดูรูปเต็ม
                   </a>
@@ -547,54 +633,97 @@ export default function AssignmentWorkspace() {
               </div>
 
               {/* Right: AI Evaluation & Edit form */}
-              <div className="lg:w-1/2 space-y-6">
+              <div className="lg:w-7/12 space-y-6">
                 
-                <div>
-                  <h4 className="font-semibold text-gray-900 mb-2 flex items-center justify-between">
-                    ข้อความที่อ่านได้ (สามารถแก้ไขได้)
-                  </h4>
+                {/* Text Editing & Live Preview */}
+                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="font-bold text-gray-900">ข้อความที่แกะมาได้ (สามารถแก้ไขได้)</h4>
+                    <div className="flex gap-3 text-xs font-medium">
+                      <span className="text-red-600 bg-red-50 px-2 py-1 rounded">จุดที่ AI ไม่มั่นใจ</span>
+                      <span className="text-green-700 bg-green-50 px-2 py-1 rounded">คำที่คุณพิมพ์แก้/เพิ่ม</span>
+                    </div>
+                  </div>
+                  
+                  {/* Live Preview Box */}
+                  <div className="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200 h-28 overflow-y-auto shadow-inner">
+                    {renderLiveDiff()}
+                  </div>
+
                   <textarea 
                     value={editedText}
                     onChange={(e) => setEditedText(e.target.value)}
-                    className="w-full bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-sm text-gray-900 font-serif leading-relaxed h-32 focus:ring-2 focus:ring-yellow-400 outline-none resize-y shadow-inner"
+                    className="w-full bg-white p-4 rounded-lg border border-gray-300 text-sm text-gray-900 font-serif leading-relaxed h-28 focus:ring-2 focus:ring-blue-500 outline-none resize-y"
                   />
+
+                  <button 
+                    onClick={handleReanalyzeText}
+                    disabled={isReanalyzing || !editedText.trim() || editedText === originalAiText.replace(/<\/?unsure>/g, '')}
+                    className="mt-3 w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                  >
+                    {isReanalyzing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
+                    วิเคราะห์และให้คะแนนใหม่จากข้อความด้านบนนี้ (Re-analyze)
+                  </button>
                 </div>
 
+                {/* Criteria Score Breakdown */}
                 <div>
-                  <h4 className="font-semibold text-gray-900 mb-3 border-b pb-2">รายละเอียดคะแนนรายข้อ</h4>
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">รายละเอียดคะแนนรายข้อ <span className="text-sm font-normal text-gray-500">(ระบบคำนวณคะแนนรวมให้อัตโนมัติ)</span></h4>
                   <div className="space-y-3">
-                    {Object.entries(selectedSub.result?.evaluation || {}).map(([key, data]: [string, any]) => (
-                      <div key={key} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                        <div className="flex justify-between items-start mb-2">
-                          <label className="text-sm font-bold text-gray-800">{key.replace('c', 'ข้อที่ ')}</label>
-                          <div className="flex items-center gap-2">
-                            <input 
-                              type="number"
-                              min={0}
-                              value={editedScores[key] ?? data.score}
-                              onChange={(e) => handleScoreChange(key, Number(e.target.value))}
-                              className="w-16 p-1 text-center border border-blue-300 rounded bg-blue-50 font-bold text-blue-700 outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-sm font-medium text-gray-500">คะแนน</span>
+                    {Object.entries(selectedSub.result?.evaluation || {}).map(([key, data]: [string, any]) => {
+                      const criteriaDef = assignment.rubricData?.criteria?.find((c:any) => c.id === key);
+                      const weight = criteriaDef?.weight || 1;
+                      const maxRaw = criteriaDef?.raw_score || criteriaDef?.max_score || 0;
+                      const currentRaw = editedScores[key] ?? data.score ?? 0;
+                      const totalSubScore = currentRaw * weight;
+
+                      return (
+                        <div key={key} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3">
+                          <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2">
+                            <label className="text-sm font-bold text-gray-800 flex-1">{key.replace('c', 'ข้อที่ ')}: {criteriaDef?.name}</label>
+                            
+                            {/* Score Breakdown UI */}
+                            <div className="flex flex-wrap items-center gap-2 text-sm bg-gray-50 p-2 rounded-lg border border-gray-200">
+                              <div className="flex items-center gap-1 bg-white border border-gray-300 rounded px-2 py-1">
+                                <span className="text-gray-500 font-medium">ดิบ</span>
+                                <input 
+                                  type="number"
+                                  min={0}
+                                  max={maxRaw}
+                                  value={currentRaw}
+                                  onChange={(e) => handleScoreChange(key, Number(e.target.value))}
+                                  className="w-12 text-center font-bold text-blue-700 outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                                />
+                                <span className="text-gray-400">/ {maxRaw}</span>
+                              </div>
+                              <span className="text-gray-400">x</span>
+                              <div className="bg-white border border-gray-300 rounded px-2 py-1 text-gray-600 font-medium">
+                                น้ำหนัก {weight}
+                              </div>
+                              <span className="text-gray-400">=</span>
+                              <div className="bg-blue-50 border border-blue-200 rounded px-3 py-1 font-bold text-blue-700">
+                                {totalSubScore} คะแนน
+                              </div>
+                            </div>
                           </div>
+                          <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg leading-relaxed">{data.reason}</p>
                         </div>
-                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg leading-relaxed">{data.reason}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
-                <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 flex justify-between items-center">
-                  <h4 className="font-bold text-gray-900">คะแนนรวมสุทธิ:</h4>
-                  <span className="text-2xl font-bold text-blue-700">{calculateNewTotal()} คะแนน</span>
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl border border-blue-200 flex justify-between items-center shadow-sm">
+                  <h4 className="font-bold text-gray-900 text-lg">คะแนนรวมสุทธิ:</h4>
+                  <span className="text-3xl font-bold text-blue-700">{calculateNewTotal()} คะแนน</span>
                 </div>
 
                 <button 
                   onClick={saveOverride}
                   disabled={isSavingOverride}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm disabled:opacity-50"
+                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm disabled:opacity-50 text-lg"
                 >
-                  {isSavingOverride ? <Loader2 className="animate-spin" /> : <Save size={18} />}
+                  {isSavingOverride ? <Loader2 className="animate-spin" /> : <Save size={20} />}
                   บันทึกผลการประเมิน
                 </button>
 

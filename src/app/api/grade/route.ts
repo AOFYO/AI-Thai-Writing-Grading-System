@@ -7,9 +7,9 @@ const SYSTEM_INSTRUCTION = `ระบบเกณฑ์เก่าไม่ไ�
 
 export async function POST(req: Request) {
   try {
-    const { imageUrl, rubricData, customStylePrompt } = await req.json();
-    if (!imageUrl) {
-      return NextResponse.json({ error: 'No image URL provided' }, { status: 400 });
+    const { imageUrl, rubricData, customStylePrompt, overrideText } = await req.json();
+    if (!imageUrl && !overrideText) {
+      return NextResponse.json({ error: 'No image URL or text provided' }, { status: 400 });
     }
 
     let currentSystemInstruction = SYSTEM_INSTRUCTION;
@@ -38,7 +38,7 @@ ${customStyleSection}
 เงื่อนไขที่นักเรียนต้องทำ: ${rubricData.description || "-"}
 
 # Instruction (คำสั่ง)
-1. อ่านข้อความลายมือจากภาพอย่างละเอียด
+1. อ่านข้อความอย่างละเอียด (หากสกัดจากภาพและมีคำไหนดูลายมือยากหรือไม่มั่นใจ ให้ครอบคำนั้นด้วยแท็ก <unsure>คำนั้น</unsure> เสมอ)
 2. ประเมิน "เปอร์เซ็นต์ความมั่นใจในการอ่าน (ocr_confidence_percent)" 0-100% หากความมั่นใจต่ำกว่า 85% ให้ตั้งค่า "needs_human_review" เป็น true
 3. ประเมินและให้คะแนนแยกตามเกณฑ์ (Rubric) ต่อไปนี้อย่างเคร่งครัด:
 ${criteriaText}
@@ -53,7 +53,7 @@ ${criteriaText}
 
 # Output JSON Schema
 {
-  "transcribed_text": "ข้อความที่นักเรียนเขียนทั้งหมด (เว้นวรรคและย่อหน้าให้ตรงตามภาพ)",
+  "transcribed_text": "ข้อความที่นักเรียนเขียนทั้งหมด (เว้นวรรคและย่อหน้าให้ตรงตามต้นฉบับ พร้อมแท็ก <unsure> หากมี)",
   "ocr_confidence_percent": 0,
   "needs_human_review": false,
   "evaluation": {
@@ -65,30 +65,36 @@ ${criteriaText}
 `;
     }
 
-    const imageResp = await fetch(imageUrl);
-    const arrayBuffer = await imageResp.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const base64Data = buffer.toString('base64');
-    const mimeType = imageResp.headers.get('content-type') || 'image/jpeg';
-
     const fallbackModels = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
     let response;
     let successfulModel = '';
+
+    // Prepare contents based on whether overrideText is provided
+    let contentParts: any[] = [];
+    
+    if (overrideText) {
+      contentParts = [
+        { text: `จงประเมินข้อความต่อไปนี้ตามเกณฑ์และตอบกลับเป็น JSON:\n\n${overrideText}` }
+      ];
+    } else {
+      const imageResp = await fetch(imageUrl);
+      const arrayBuffer = await imageResp.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const base64Data = buffer.toString('base64');
+      const mimeType = imageResp.headers.get('content-type') || 'image/jpeg';
+      
+      contentParts = [
+        { inlineData: { data: base64Data, mimeType } },
+        { text: "จงประเมินกระดาษคำตอบแผ่นนี้ตามเกณฑ์และตอบกลับเป็น JSON โดยอย่าลืมใส่ <unsure> ครอบคำที่ไม่มั่นใจ" }
+      ];
+    }
 
     for (const modelName of fallbackModels) {
       try {
         console.log(`Attempting to grade with ${modelName}...`);
         response = await ai.models.generateContent({
           model: modelName,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { inlineData: { data: base64Data, mimeType } },
-                { text: "จงประเมินกระดาษคำตอบแผ่นนี้ตามเกณฑ์และตอบกลับเป็น JSON" }
-              ]
-            }
-          ],
+          contents: [{ role: 'user', parts: contentParts }],
           config: {
             systemInstruction: currentSystemInstruction,
             responseMimeType: "application/json",
