@@ -357,7 +357,9 @@ export default function AssignmentWorkspace() {
     const initialComments: any = {};
     if (sub.result?.evaluation) {
       Object.keys(sub.result.evaluation).forEach(k => {
-        initialScores[k] = sub.result.evaluation[k].score || 0;
+        const criteriaDef = assignment?.rubricData?.criteria?.find((c:any) => c.id === k);
+        const weight = criteriaDef?.weight || 1;
+        initialScores[k] = (sub.result.evaluation[k].score || 0) / weight;
         initialComments[k] = sub.result.evaluation[k].teacher_comment || "";
       });
     }
@@ -394,7 +396,9 @@ export default function AssignmentWorkspace() {
       if (updatedResult.evaluation) {
         Object.keys(editedScores).forEach(k => {
           if (updatedResult.evaluation[k]) {
-            updatedResult.evaluation[k].score = editedScores[k];
+            const criteriaDef = assignment?.rubricData?.criteria?.find((c:any) => c.id === k);
+            const weight = criteriaDef?.weight || 1;
+            updatedResult.evaluation[k].score = editedScores[k] * weight;
             updatedResult.evaluation[k].teacher_comment = teacherComments[k] || "";
           }
         });
@@ -438,7 +442,9 @@ export default function AssignmentWorkspace() {
       const initialComments: any = { ...teacherComments };
       if (data.evaluation) {
         Object.keys(data.evaluation).forEach(k => {
-          initialScores[k] = data.evaluation[k].score || 0;
+          const criteriaDef = assignment?.rubricData?.criteria?.find((c:any) => c.id === k);
+          const weight = criteriaDef?.weight || 1;
+          initialScores[k] = (data.evaluation[k].score || 0) / weight;
         });
       }
       setEditedScores(initialScores);
@@ -816,7 +822,7 @@ export default function AssignmentWorkspace() {
                       const criteriaDef = assignment.rubricData?.criteria?.find((c:any) => c.id === key);
                       const weight = criteriaDef?.weight || 1;
                       const maxRaw = criteriaDef?.raw_score || criteriaDef?.max_score || 0;
-                      const currentRaw = editedScores[key] ?? data.score ?? 0;
+                      const currentRaw = editedScores[key] ?? ((data.score || 0) / weight) ?? 0;
                       const totalSubScore = currentRaw * weight;
 
                       return (
