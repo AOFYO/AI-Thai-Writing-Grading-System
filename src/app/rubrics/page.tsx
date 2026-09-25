@@ -140,7 +140,7 @@ export default function RubricsBuilderPage() {
   };
 
   const loadRubricForEdit = (r: any) => {
-    const canEdit = r.createdBy === user?.uid || userData?.role === 'admin' || (!r.createdBy && userData?.role === 'admin');
+    const canEdit = r.createdBy === user?.uid || (userData?.role as string) === 'admin' || (!r.createdBy && (userData?.role as string) === 'admin');
     if (!canEdit) {
       alert("คุณไม่มีสิทธิแก้ไขเกณฑ์นี้ (กรุณากด 'ทำสำเนา' แทน)");
       return;
@@ -160,7 +160,11 @@ export default function RubricsBuilderPage() {
     setPreviewUrl(null);
   };
 
-  const handleDeleteRubric = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteRubric = async (id: string, r: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const canDelete = r.createdBy === user?.uid || (userData?.role as string) === 'admin' || (!r.createdBy && (userData?.role as string) === 'admin');
+    if (!canDelete) return alert("คุณไม่มีสิทธิลบเกณฑ์นี้");
+  
     e.stopPropagation();
     if (!confirm("คุณต้องการลบเกณฑ์นี้ใช่หรือไม่? (หากเกณฑ์นี้ถูกใช้ในชิ้นงานไปแล้ว ชิ้นงานนั้นอาจได้รับผลกระทบ)")) return;
     try {
@@ -219,10 +223,31 @@ export default function RubricsBuilderPage() {
                   className={`p-3 rounded-lg border cursor-pointer group flex justify-between items-start transition-colors ${selectedRubricId === r.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}
                 >
                   <div>
-                    <h3 className={`font-medium text-sm line-clamp-2 ${selectedRubricId === r.id ? 'text-blue-700' : 'text-gray-800'}`}>{r.title}</h3>
+                    <div className="flex justify-between items-start">
+    <h3 className={`font-medium text-sm line-clamp-2 ${selectedRubricId === r.id ? 'text-blue-700' : 'text-gray-800'}`}>{r.title}</h3>
+    {(!r.createdBy || r.creatorRole === 'admin') && <span className="text-[9px] bg-red-100 text-red-600 px-1 py-0.5 rounded ml-1 whitespace-nowrap">Admin</span>}
+  </div>
                     <p className="text-xs text-gray-500 mt-1">{r.criteria?.length || 0} หัวข้อ</p>
+   {r.createdBy !== user?.uid && (userData?.role as string) !== 'admin' && (
+      <button onClick={(e) => {
+        e.stopPropagation();
+        const cloned = { ...r };
+        const mappedCriteria = cloned.criteria?.map((c: any) => ({
+            ...c,
+            raw_score: c.raw_score || c.max_score || 5,
+            weight: c.weight || 1,
+            max_score: c.max_score || 5
+        })) || [];
+        setRubric({ title: r.title + " (สำเนา)", description: r.description, criteria: mappedCriteria });
+        setSelectedRubricId(null);
+      }} className="mt-1 text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 flex items-center gap-1 w-fit">
+        <Copy size={10} /> ทำสำเนา
+      </button>
+   )}
                   </div>
-                  <button onClick={(e) => handleDeleteRubric(r.id, e)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1">
+                  {(r.createdBy === user?.uid || (userData?.role as string) === 'admin') && (
+    <button onClick={(e) => handleDeleteRubric(r.id, r, e)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1">
+  
                     <Trash2 size={14} />
                   </button>
                 </div>
