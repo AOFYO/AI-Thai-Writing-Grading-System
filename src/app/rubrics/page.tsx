@@ -128,7 +128,7 @@ export default function RubricsBuilderPage() {
         });
         alert("บันทึกเกณฑ์ประเมินใหม่สำเร็จ!");
       }
-      await fetchRubrics(user.uid);
+      await fetchRubrics();
       setRubric(emptyRubric);
       setSelectedRubricId(null);
       setFile(null);
@@ -169,7 +169,7 @@ export default function RubricsBuilderPage() {
         setRubric(emptyRubric);
         setSelectedRubricId(null);
       }
-      fetchRubrics(user.uid);
+      fetchRubrics();
     } catch (err) {
       alert("ลบไม่สำเร็จ");
     }

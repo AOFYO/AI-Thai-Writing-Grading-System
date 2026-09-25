@@ -54,19 +54,15 @@ export default function AssignmentWorkspace() {
   const imageRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!currentUser) router.push("/login");
-      else {
-        setUser(currentUser);
-        if (assignmentId) {
-          fetchAssignmentData(currentUser.uid, assignmentId);
-          fetchSkills();
-        }
+    if (!authChecking) {
+      if (!user) router.push("/login");
+      else if (userData?.role === "guest") router.push("/pending-approval");
+      else if (assignmentId) {
+        fetchAssignmentData(user.uid, assignmentId);
+        fetchSkills();
       }
-      setAuthChecking(false);
-    });
-    return () => unsubscribe();
-  }, [router, assignmentId]);
+    }
+  }, [user, userData, authChecking, router, assignmentId]);
 
   const fetchAssignmentData = async (uid: string, id: string) => {
     try {

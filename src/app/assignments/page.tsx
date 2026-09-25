@@ -28,8 +28,7 @@ export default function AssignmentsHubPage() {
       if (!user) router.push("/login");
       else if (userData?.role === "guest") router.push("/pending-approval");
       else {
-        fetchRubrics();
-        fetchAssignments(user.uid);
+        fetchData(user.uid);
       }
     }
   }, [user, userData, authChecking, router]);
@@ -37,7 +36,7 @@ export default function AssignmentsHubPage() {
   const fetchData = async (uid: string) => {
     try {
       // Fetch Rubrics
-      const rubricsSnap = await getDocs(query(collection(db, "rubrics"), where("createdBy", "==", uid)));
+      const rubricsSnap = await getDocs(query(collection(db, "rubrics")));
       setRubrics(rubricsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       // Fetch Assignments
