@@ -231,7 +231,7 @@ function UserRow({ user, onSave, isSaving }: { user: UserDoc, onSave: (r: string
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
           <div className="w-24 bg-gray-200 rounded-full h-2.5 overflow-hidden">
-            <div className={`h-2.5 rounded-full ${user.monthlyUsed >= user.monthlyQuota ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: \`\${Math.min(100, (user.monthlyUsed / user.monthlyQuota) * 100)}%\` }}></div>
+            <div className={`h-2.5 rounded-full ${user.monthlyUsed >= user.monthlyQuota ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, (user.monthlyUsed / user.monthlyQuota) * 100)}%` }}></div>
           </div>
           <span className="text-xs">{user.monthlyUsed} / {user.monthlyQuota}</span>
         </div>
@@ -239,7 +239,7 @@ function UserRow({ user, onSave, isSaving }: { user: UserDoc, onSave: (r: string
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
           <div className="w-24 bg-gray-200 rounded-full h-2.5 overflow-hidden">
-            <div className={`h-2.5 rounded-full ${user.dailyUsed >= user.rpdLimit ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: \`\${Math.min(100, (user.dailyUsed / user.rpdLimit) * 100)}%\` }}></div>
+            <div className={`h-2.5 rounded-full ${user.dailyUsed >= user.rpdLimit ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, (user.dailyUsed / user.rpdLimit) * 100)}%` }}></div>
           </div>
           <span className="text-xs">{user.dailyUsed} / {user.rpdLimit}</span>
         </div>
