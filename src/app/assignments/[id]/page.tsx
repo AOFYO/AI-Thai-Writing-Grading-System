@@ -28,10 +28,11 @@ export default function AssignmentWorkspace() {
   const thisMonth = today.substring(0, 7);
   const currentDaily = userData?.lastRequestDate === today ? (userData.dailyUsed || 0) : 0;
   const currentMonthly = userData?.lastRequestMonth === thisMonth ? (userData.monthlyUsed || 0) : 0;
-  const maxAssignmentScore = assignment?.rubricData?.criteria?.reduce((sum: any, c: any) => sum + ((c.max_score || 5) * (c.weight || 1)), 0) || 0;
+  
   
   const [assignment, setAssignment] = useState<any>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
+  const maxAssignmentScore = assignment?.rubricData?.criteria?.reduce((sum: any, c: any) => sum + ((c.max_score || 5) * (c.weight || 1)), 0) || 0;  
   
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
@@ -158,7 +159,7 @@ export default function AssignmentWorkspace() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      if (confirm(`AI สกัดสไตล์การตรวจของคุณได้ดังนี้:\n\n"${data.skillText}"\n\nคุณต้องการบันทึกเป็นสไตล์ใหม่เพื่อใช้ตรวจครั้งหน้าหรือไม่?`)) {
+      if (confirm(`AI สกัดสไตล์การตรวจของคุณได้ดังนี้:"${data.skillText}"คุณต้องการบันทึกเป็นสไตล์ใหม่เพื่อใช้ตรวจครั้งหน้าหรือไม่?`)) {
         await saveAsNewSkill(data.skillText);
       }
     } catch (err: any) {
@@ -325,15 +326,15 @@ export default function AssignmentWorkspace() {
     if (!assignment) return;
     const maxStudents = assignment.maxStudents || 0;
     let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
-    csvContent += "เลขที่,คะแนนรวม,สถานะการตรวจ\n";
+    csvContent += "เลขที่,คะแนนรวม,สถานะการตรวจ";
 
     for (let i = 1; i <= maxStudents; i++) {
       const sub = submissions.find(s => s.studentNumber === i);
       if (sub) {
         const score = sub.isOverridden ? sub.overrideScore : sub.result?.total_raw_score;
-        csvContent += `${i},${score},ตรวจแล้ว\n`;
+        csvContent += `${i},${score},ตรวจแล้ว`;
       } else {
-        csvContent += `${i},0,ยังไม่ส่ง\n`;
+        csvContent += `${i},0,ยังไม่ส่ง`;
       }
     }
     
