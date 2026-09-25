@@ -250,6 +250,7 @@ export default function RubricsBuilderPage() {
   
                     <Trash2 size={14} />
                   </button>
+                  )}
                 </div>
               ))}
               {myRubrics.length === 0 && (
