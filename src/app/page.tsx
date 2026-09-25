@@ -1,44 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useUserRole } from "@/hooks/useUserRole";
 import { auth } from "@/lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, FileText, CheckSquare, Settings, LogOut, FileSignature, ArrowRight } from "lucide-react";
+import { Loader2, FileText, CheckSquare, Settings, LogOut, FileSignature, ArrowRight, ShieldCheck } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [authChecking, setAuthChecking] = useState(true);
+  const { user, userData, loading } = useUserRole();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!currentUser) {
+    if (!loading) {
+      if (!user) {
         router.push("/login");
-      } else {
-        setUser(currentUser);
+      } else if (userData?.role === "guest") {
+        router.push("/pending-approval");
       }
-      setAuthChecking(false);
-    });
-
-    return () => unsubscribe();
-  }, [router]);
+    }
+  }, [user, userData, loading, router]);
 
   const handleLogout = async () => {
     await auth.signOut();
     router.push("/login");
   };
 
-  if (authChecking) {
+  if (loading || !user || userData?.role === "guest") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <Loader2 className="animate-spin h-8 w-8 text-blue-600" />
       </div>
     );
   }
-
-  if (!user) return null; // Will redirect in useEffect
 
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center p-4 sm:p-8">
@@ -52,15 +46,27 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-800 tracking-tight">AI Thai Writing Grader</h1>
-              <p className="text-sm text-gray-500">ยินดีต้อนรับ, {user.email}</p>
+              <p className="text-sm text-gray-500 flex items-center gap-2">
+                ยินดีต้อนรับ, {user.email} 
+                <span className={`uppercase text-xs font-bold px-2 py-0.5 rounded ${userData?.role === 'admin' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                  {userData?.role}
+                </span>
+              </p>
             </div>
           </div>
-          <button 
-            onClick={handleLogout}
-            className="text-gray-500 hover:text-red-600 font-medium text-sm flex items-center gap-2 transition-colors px-4 py-2 hover:bg-red-50 rounded-lg"
-          >
-            <LogOut size={16} /> ออกจากระบบ
-          </button>
+          <div className="flex items-center gap-2">
+            {userData?.role === "admin" && (
+              <Link href="/admin" className="text-red-600 hover:text-red-700 font-medium text-sm flex items-center gap-2 transition-colors px-4 py-2 hover:bg-red-50 rounded-lg">
+                <ShieldCheck size={16} /> จัดการระบบ (Admin)
+              </Link>
+            )}
+            <button 
+              onClick={handleLogout}
+              className="text-gray-500 hover:text-gray-700 font-medium text-sm flex items-center gap-2 transition-colors px-4 py-2 hover:bg-gray-100 rounded-lg"
+            >
+              <LogOut size={16} /> ออกจากระบบ
+            </button>
+          </div>
         </header>
 
         {/* Dashboard Grid */}

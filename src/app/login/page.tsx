@@ -1,29 +1,61 @@
 "use client";
 
 import { signInWithPopup } from "firebase/auth";
-import { auth, googleProvider } from "@/lib/firebase";
+import { auth, googleProvider, db } from "@/lib/firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { FileText } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileText, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // If already logged in, redirect to home
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) router.push("/");
+      if (user && !isLoggingIn) router.push("/");
     });
     return () => unsubscribe();
-  }, [router]);
+  }, [router, isLoggingIn]);
 
   const handleLogin = async () => {
+    setIsLoggingIn(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      
+      // Check if user exists in Firestore
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        // First time login -> Register in DB
+        const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "";
+        const isMasterAdmin = user.email === adminEmail;
+        
+        const initialUserData = {
+          uid: user.uid,
+          email: user.email,
+          role: isMasterAdmin ? "admin" : "guest",
+          tier: "free",
+          monthlyQuota: 100, // Default for new users
+          monthlyUsed: 0,
+          rpdLimit: 20, // Default 20 scans per day
+          dailyUsed: 0,
+          lastRequestDate: "",
+          lastRequestMonth: "",
+          createdAt: new Date().toISOString()
+        };
+        
+        await setDoc(userRef, initialUserData);
+      }
+      
       router.push("/");
     } catch (error: any) {
       console.error("Login failed:", error);
-      alert("ไม่สามารถเข้าสู่ระบบได้: " + error.message);
+      alert("เข้าสู่ระบบล้มเหลว: " + error.message);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -36,14 +68,19 @@ export default function LoginPage() {
           </div>
         </div>
         
-        <h1 className="text-2xl font-bold text-gray-800">ระบบผู้ช่วย AI ตรวจข้อสอบ</h1>
-        <p className="text-gray-500">กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อใช้งานระบบสำหรับครูผู้สอน</p>
+        <h1 className="text-2xl font-bold text-gray-800">ระบบ AI ตรวจข้อสอบ</h1>
+        <p className="text-gray-500">กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อใช้งาน</p>
         
         <button 
           onClick={handleLogin}
-          className="w-full flex items-center justify-center gap-3 bg-white border-2 border-gray-200 text-gray-700 hover:bg-gray-50 font-semibold py-3 px-4 rounded-lg transition-colors shadow-sm"
+          disabled={isLoggingIn}
+          className="w-full flex items-center justify-center gap-3 bg-white border-2 border-gray-200 text-gray-700 hover:bg-gray-50 font-semibold py-3 px-4 rounded-lg transition-colors shadow-sm disabled:opacity-50"
         >
-          <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className="w-6 h-6" />
+          {isLoggingIn ? (
+            <Loader2 className="animate-spin text-gray-500" />
+          ) : (
+            <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className="w-6 h-6" />
+          )}
           เข้าสู่ระบบด้วย Google
         </button>
       </div>
