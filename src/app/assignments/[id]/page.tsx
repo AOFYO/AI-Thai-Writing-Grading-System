@@ -32,7 +32,7 @@ export default function AssignmentWorkspace() {
   
   const [assignment, setAssignment] = useState<any>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
-  const maxAssignmentScore = assignment?.rubricData?.criteria?.reduce((sum: any, c: any) => sum + ((c.max_score || 5) * (c.weight || 1)), 0) || 0;  
+  const maxAssignmentScore = assignment?.rubricData?.criteria?.reduce((sum: any, c: any) => sum + (Number(c.max_score) || 5), 0) || 0;  
   
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
