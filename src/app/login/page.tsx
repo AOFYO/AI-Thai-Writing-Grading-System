@@ -38,9 +38,9 @@ export default function LoginPage() {
           email: user.email,
           role: isMasterAdmin ? "admin" : "guest",
           tier: "free",
-          monthlyQuota: 100, // Default for new users
+          monthlyQuota: 50, // Default for new users
           monthlyUsed: 0,
-          rpdLimit: 20, // Default 20 scans per day
+          rpdLimit: 10, // Default 20 scans per day
           dailyUsed: 0,
           lastRequestDate: "",
           lastRequestMonth: "",
