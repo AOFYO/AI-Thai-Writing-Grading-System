@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, collection, addDoc, updateDoc, getDocs, query, where } from "firebase/firestore";
 import { useRouter, useParams } from "next/navigation";
-import { Loader2, ArrowLeft, UploadCloud, Play, CheckCircle, AlertTriangle, Download, X, Save, Sparkles, BrainCircuit, FileText, RefreshCw } from "lucide-react";
+import { Loader2, ArrowLeft, UploadCloud, Play, CheckCircle, AlertTriangle, Download, X, Save, Sparkles, BrainCircuit, FileText, RefreshCw, ZoomIn } from "lucide-react";
 import Link from "next/link";
 
 interface PendingFile {
@@ -38,14 +38,21 @@ export default function AssignmentWorkspace() {
   const [selectedSkillId, setSelectedSkillId] = useState<string>("");
   const [activeSkillText, setActiveSkillText] = useState<string>("");
   const [isSkillEdited, setIsSkillEdited] = useState(false);
+  const [isExtractingSkill, setIsExtractingSkill] = useState(false);
 
   // Review Modal State
   const [selectedSub, setSelectedSub] = useState<any>(null);
   const [originalAiText, setOriginalAiText] = useState("");
   const [editedText, setEditedText] = useState("");
   const [editedScores, setEditedScores] = useState<any>({});
+  const [teacherComments, setTeacherComments] = useState<any>({});
   const [isSavingOverride, setIsSavingOverride] = useState(false);
   const [isReanalyzing, setIsReanalyzing] = useState(false);
+
+  // Hover Zoom State
+  const [showZoom, setShowZoom] = useState(false);
+  const [zoomStyle, setZoomStyle] = useState({});
+  const imageRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -107,24 +114,52 @@ export default function AssignmentWorkspace() {
     setIsSkillEdited(true);
   };
 
-  const saveAsNewSkill = async () => {
+  const saveAsNewSkill = async (defaultText?: string) => {
+    const textToSave = defaultText || activeSkillText;
     const name = prompt("ตั้งชื่อสไตล์การตรวจใหม่นี้ (เช่น สไตล์ครูใจดี):");
     if (!name) return;
     try {
       const newSkill = {
         name,
-        prompt: activeSkillText,
+        prompt: textToSave,
         createdBy: user.uid,
         createdAt: new Date().toISOString()
       };
       const docRef = await addDoc(collection(db, "ai_skills"), newSkill);
       await fetchSkills();
       setSelectedSkillId(docRef.id);
+      setActiveSkillText(textToSave);
       setIsSkillEdited(false);
       alert("บันทึกสไตล์การตรวจใหม่สำเร็จ!");
     } catch (error: any) {
       alert("บันทึกไม่สำเร็จ: " + error.message);
     }
+  };
+
+  const extractSkillFromCorrections = async () => {
+    if (!selectedSub) return;
+    setIsExtractingSkill(true);
+    try {
+      const res = await fetch("/api/extract-skill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          originalResult: selectedSub.result,
+          editedScores,
+          teacherComments,
+          rubricData: assignment.rubricData
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      if (confirm(`AI สกัดสไตล์การตรวจของคุณได้ดังนี้:\n\n"${data.skillText}"\n\nคุณต้องการบันทึกเป็นสไตล์ใหม่เพื่อใช้ตรวจครั้งหน้าหรือไม่?`)) {
+        await saveAsNewSkill(data.skillText);
+      }
+    } catch (err: any) {
+      alert("สกัด Skill ล้มเหลว: " + err.message);
+    }
+    setIsExtractingSkill(false);
   };
 
   const handleFiles = (files: File[]) => {
@@ -274,16 +309,23 @@ export default function AssignmentWorkspace() {
     setEditedText(rawAiText.replace(/<\/?unsure>/g, ''));
     
     const initialScores: any = {};
+    const initialComments: any = {};
     if (sub.result?.evaluation) {
       Object.keys(sub.result.evaluation).forEach(k => {
         initialScores[k] = sub.result.evaluation[k].score || 0;
+        initialComments[k] = sub.result.evaluation[k].teacher_comment || "";
       });
     }
     setEditedScores(initialScores);
+    setTeacherComments(initialComments);
   };
 
   const handleScoreChange = (criteriaId: string, val: number) => {
     setEditedScores((prev: any) => ({ ...prev, [criteriaId]: val }));
+  };
+
+  const handleCommentChange = (criteriaId: string, text: string) => {
+    setTeacherComments((prev: any) => ({ ...prev, [criteriaId]: text }));
   };
 
   const calculateNewTotal = () => {
@@ -302,12 +344,13 @@ export default function AssignmentWorkspace() {
       const newTotal = calculateNewTotal();
       
       const updatedResult = { ...selectedSub.result };
-      updatedResult.transcribed_text = editedText; // Save the cleaned, edited text
+      updatedResult.transcribed_text = editedText; 
       updatedResult.total_raw_score = newTotal;
       if (updatedResult.evaluation) {
         Object.keys(editedScores).forEach(k => {
           if (updatedResult.evaluation[k]) {
             updatedResult.evaluation[k].score = editedScores[k];
+            updatedResult.evaluation[k].teacher_comment = teacherComments[k] || "";
           }
         });
       }
@@ -343,17 +386,18 @@ export default function AssignmentWorkspace() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "วิเคราะห์ใหม่ล้มเหลว");
 
-      // Update local state with new AI result
       const newSubData = { ...selectedSub, result: data };
       setSelectedSub(newSubData);
       
       const initialScores: any = {};
+      const initialComments: any = { ...teacherComments };
       if (data.evaluation) {
         Object.keys(data.evaluation).forEach(k => {
           initialScores[k] = data.evaluation[k].score || 0;
         });
       }
       setEditedScores(initialScores);
+      setTeacherComments(initialComments);
       alert("AI วิเคราะห์คะแนนใหม่จากข้อความที่แก้ไขเสร็จสมบูรณ์");
 
     } catch (err: any) {
@@ -367,7 +411,6 @@ export default function AssignmentWorkspace() {
   // -------------------------
   const renderLiveDiff = () => {
     if (typeof Intl === 'undefined' || !Intl.Segmenter) {
-      // Fallback for browsers without Intl.Segmenter
       return <div className="text-gray-700">{editedText}</div>;
     }
 
@@ -376,29 +419,22 @@ export default function AssignmentWorkspace() {
       const cleanOriginal = originalAiText.replace(/<\/?unsure>/g, '');
       
       const oldWordsSet = new Set(Array.from(segmenter.segment(cleanOriginal)).map(s => s.segment));
-      
-      // Extract unsure words directly from tags to a Set
       const unsureMatches = originalAiText.match(/<unsure>(.*?)<\/unsure>/g) || [];
       const unsureWordsSet = new Set(unsureMatches.map(s => s.replace(/<\/?unsure>/g, '')));
-
       const segments = Array.from(segmenter.segment(editedText));
       
       return (
         <div className="text-gray-800 leading-relaxed font-serif whitespace-pre-wrap">
           {segments.map((seg, idx) => {
             const w = seg.segment;
-            if (w.trim() === '') return <span key={idx}>{w}</span>; // Keep whitespace normal
+            if (w.trim() === '') return <span key={idx}>{w}</span>;
             
             if (!oldWordsSet.has(w)) {
-              // Word is entirely new or modified by teacher -> Green
               return <span key={idx} className="bg-green-100 text-green-700 font-bold px-0.5 rounded">{w}</span>;
             }
             if (unsureWordsSet.has(w)) {
-              // Word is from original AI and was marked unsure -> Red
               return <span key={idx} className="bg-red-100 text-red-600 font-bold px-0.5 rounded">{w}</span>;
             }
-            
-            // Normal word
             return <span key={idx}>{w}</span>;
           })}
         </div>
@@ -408,6 +444,20 @@ export default function AssignmentWorkspace() {
     }
   };
 
+  // -------------------------
+  // Hover Zoom Logic
+  // -------------------------
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!imageRef.current) return;
+    const { left, top, width, height } = imageRef.current.getBoundingClientRect();
+    const x = ((e.clientX - left) / width) * 100;
+    const y = ((e.clientY - top) / height) * 100;
+    setZoomStyle({
+      backgroundImage: `url(${selectedSub?.imageUrl})`,
+      backgroundPosition: `${x}% ${y}%`,
+      backgroundSize: '250%' // Zoom level
+    });
+  };
 
   if (authChecking || !user || !assignment) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" /></div>;
 
@@ -472,7 +522,7 @@ export default function AssignmentWorkspace() {
                 />
                 {isSkillEdited && (
                   <button 
-                    onClick={saveAsNewSkill}
+                    onClick={() => saveAsNewSkill()}
                     className="mt-2 text-sm text-indigo-600 font-medium hover:underline flex items-center gap-1"
                   >
                     <Save size={14} /> บันทึกเป็นสไตล์ของฉัน (Clone & Save)
@@ -602,7 +652,7 @@ export default function AssignmentWorkspace() {
       {/* Teacher Review Modal */}
       {selectedSub && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-200">
             
             {/* Modal Header */}
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
@@ -619,14 +669,38 @@ export default function AssignmentWorkspace() {
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 flex flex-col lg:flex-row gap-6">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col lg:flex-row gap-6">
               
-              {/* Left: Original Image */}
+              {/* Left: Original Image & Hover Zoom */}
               <div className="lg:w-5/12">
-                <h4 className="font-semibold text-gray-800 mb-3">กระดาษคำตอบต้นฉบับ</h4>
-                <div className="bg-gray-100 rounded-xl overflow-hidden border border-gray-200 relative group">
-                  <img src={selectedSub.imageUrl} alt="Exam" className="w-full h-auto object-contain max-h-[70vh]" />
-                  <a href={selectedSub.imageUrl} target="_blank" rel="noreferrer" className="absolute top-2 right-2 bg-white/90 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-white">
+                <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                  <ZoomIn size={16} className="text-blue-600"/> กระดาษคำตอบต้นฉบับ 
+                  <span className="text-xs font-normal text-gray-500">(ชี้เพื่อซูม)</span>
+                </h4>
+                
+                {/* Hover Zoom Container */}
+                <div 
+                  className="bg-gray-100 rounded-xl overflow-hidden border border-gray-200 relative group cursor-crosshair"
+                  onMouseEnter={() => setShowZoom(true)}
+                  onMouseLeave={() => setShowZoom(false)}
+                  onMouseMove={handleMouseMove}
+                >
+                  <img 
+                    ref={imageRef}
+                    src={selectedSub.imageUrl} 
+                    alt="Exam" 
+                    className="w-full h-auto object-contain max-h-[75vh]" 
+                  />
+                  
+                  {/* Magnifying Glass (Floating Div) */}
+                  {showZoom && (
+                    <div 
+                      className="absolute inset-0 pointer-events-none z-10 transition-opacity duration-200"
+                      style={zoomStyle}
+                    ></div>
+                  )}
+
+                  <a href={selectedSub.imageUrl} target="_blank" rel="noreferrer" className="absolute top-2 right-2 bg-white/90 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-white z-20">
                     ดูรูปเต็ม
                   </a>
                 </div>
@@ -645,8 +719,8 @@ export default function AssignmentWorkspace() {
                     </div>
                   </div>
                   
-                  {/* Live Preview Box */}
-                  <div className="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200 h-28 overflow-y-auto shadow-inner">
+                  {/* Live Preview Box - Resizable */}
+                  <div className="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200 h-28 overflow-auto resize-y shadow-inner">
                     {renderLiveDiff()}
                   </div>
 
@@ -666,10 +740,10 @@ export default function AssignmentWorkspace() {
                   </button>
                 </div>
 
-                {/* Criteria Score Breakdown */}
+                {/* Criteria Score Breakdown & Teacher Comments */}
                 <div>
                   <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">รายละเอียดคะแนนรายข้อ <span className="text-sm font-normal text-gray-500">(ระบบคำนวณคะแนนรวมให้อัตโนมัติ)</span></h4>
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {Object.entries(selectedSub.result?.evaluation || {}).map(([key, data]: [string, any]) => {
                       const criteriaDef = assignment.rubricData?.criteria?.find((c:any) => c.id === key);
                       const weight = criteriaDef?.weight || 1;
@@ -679,11 +753,11 @@ export default function AssignmentWorkspace() {
 
                       return (
                         <div key={key} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3">
-                          <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2">
+                          <div className="flex flex-col xl:flex-row justify-between xl:items-start gap-3">
                             <label className="text-sm font-bold text-gray-800 flex-1">{key.replace('c', 'ข้อที่ ')}: {criteriaDef?.name}</label>
                             
                             {/* Score Breakdown UI */}
-                            <div className="flex flex-wrap items-center gap-2 text-sm bg-gray-50 p-2 rounded-lg border border-gray-200">
+                            <div className="flex flex-wrap items-center gap-2 text-sm bg-gray-50 p-2 rounded-lg border border-gray-200 shrink-0">
                               <div className="flex items-center gap-1 bg-white border border-gray-300 rounded px-2 py-1">
                                 <span className="text-gray-500 font-medium">ดิบ</span>
                                 <input 
@@ -706,26 +780,50 @@ export default function AssignmentWorkspace() {
                               </div>
                             </div>
                           </div>
-                          <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg leading-relaxed">{data.reason}</p>
+                          
+                          <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg leading-relaxed border border-gray-100">{data.reason}</p>
+                          
+                          {/* Teacher Comment Box */}
+                          <div>
+                            <textarea 
+                              placeholder="หมายเหตุ/เหตุผลที่ครูแก้ไขคะแนนข้อนี้ (Teacher Comment)..."
+                              value={teacherComments[key] || ""}
+                              onChange={(e) => handleCommentChange(key, e.target.value)}
+                              className="w-full text-sm p-3 border border-blue-200 rounded-lg bg-blue-50/30 focus:bg-white resize-y outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-blue-300 text-blue-900"
+                              rows={2}
+                            />
+                          </div>
                         </div>
                       );
                     })}
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl border border-blue-200 flex justify-between items-center shadow-sm">
+                {/* Final Score and Save Actions */}
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl border border-blue-200 flex flex-col sm:flex-row justify-between items-center shadow-sm gap-4">
                   <h4 className="font-bold text-gray-900 text-lg">คะแนนรวมสุทธิ:</h4>
                   <span className="text-3xl font-bold text-blue-700">{calculateNewTotal()} คะแนน</span>
                 </div>
 
-                <button 
-                  onClick={saveOverride}
-                  disabled={isSavingOverride}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm disabled:opacity-50 text-lg"
-                >
-                  {isSavingOverride ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-                  บันทึกผลการประเมิน
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button 
+                    onClick={saveOverride}
+                    disabled={isSavingOverride}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm disabled:opacity-50 text-lg"
+                  >
+                    {isSavingOverride ? <Loader2 className="animate-spin" /> : <Save size={20} />}
+                    บันทึกคะแนน
+                  </button>
+                  
+                  <button
+                    onClick={extractSkillFromCorrections}
+                    disabled={isExtractingSkill}
+                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm disabled:opacity-50 text-base"
+                  >
+                    {isExtractingSkill ? <Loader2 className="animate-spin" /> : <BrainCircuit size={18} />}
+                    🧠 เรียนรู้สไตล์การตรวจ
+                  </button>
+                </div>
 
               </div>
             </div>
