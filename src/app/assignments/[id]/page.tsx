@@ -309,7 +309,7 @@ export default function AssignmentWorkspace() {
         
       } catch (err: any) {
         updatePendingFile(item.id, { status: "error", errorMsg: err.message });
-        break;
+        await new Promise(r => setTimeout(r, 3000));
       }
     }
     
