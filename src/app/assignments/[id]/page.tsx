@@ -356,10 +356,25 @@ export default function AssignmentWorkspace() {
     const initialScores: any = {};
     const initialComments: any = {};
     if (sub.result?.evaluation) {
+      let sumAssumeRaw = 0;
+      let sumAssumeWeighted = 0;
+      const totalRawScore = sub.result.total_raw_score || 0;
+      Object.keys(sub.result.evaluation).forEach(k => {
+        const cDef = assignment?.rubricData?.criteria?.find((c:any) => c.id === k);
+        const w = cDef?.weight || 1;
+        const s = sub.result.evaluation[k].score || 0;
+        sumAssumeRaw += (s * w);
+        sumAssumeWeighted += s;
+      });
+      const diffRaw = Math.abs(sumAssumeRaw - totalRawScore);
+      const diffWeighted = Math.abs(sumAssumeWeighted - totalRawScore);
+      const isWeighted = diffWeighted <= diffRaw;
+
       Object.keys(sub.result.evaluation).forEach(k => {
         const criteriaDef = assignment?.rubricData?.criteria?.find((c:any) => c.id === k);
         const weight = criteriaDef?.weight || 1;
-        initialScores[k] = (sub.result.evaluation[k].score || 0) / weight;
+        const rawScore = isWeighted ? ((sub.result.evaluation[k].score || 0) / weight) : (sub.result.evaluation[k].score || 0);
+        initialScores[k] = rawScore;
         initialComments[k] = sub.result.evaluation[k].teacher_comment || "";
       });
     }
@@ -441,10 +456,25 @@ export default function AssignmentWorkspace() {
       const initialScores: any = {};
       const initialComments: any = { ...teacherComments };
       if (data.evaluation) {
+        let sumAssumeRaw = 0;
+        let sumAssumeWeighted = 0;
+        const totalRawScore = data.total_raw_score || 0;
+        Object.keys(data.evaluation).forEach(k => {
+          const cDef = assignment?.rubricData?.criteria?.find((c:any) => c.id === k);
+          const w = cDef?.weight || 1;
+          const s = data.evaluation[k].score || 0;
+          sumAssumeRaw += (s * w);
+          sumAssumeWeighted += s;
+        });
+        const diffRaw = Math.abs(sumAssumeRaw - totalRawScore);
+        const diffWeighted = Math.abs(sumAssumeWeighted - totalRawScore);
+        const isWeighted = diffWeighted <= diffRaw;
+
         Object.keys(data.evaluation).forEach(k => {
           const criteriaDef = assignment?.rubricData?.criteria?.find((c:any) => c.id === k);
           const weight = criteriaDef?.weight || 1;
-          initialScores[k] = (data.evaluation[k].score || 0) / weight;
+          const rawScore = isWeighted ? ((data.evaluation[k].score || 0) / weight) : (data.evaluation[k].score || 0);
+          initialScores[k] = rawScore;
         });
       }
       setEditedScores(initialScores);
