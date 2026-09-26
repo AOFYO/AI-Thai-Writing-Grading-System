@@ -418,7 +418,7 @@ export default function AssignmentWorkspace() {
     const diffWeighted = Math.abs(sumAssumeWeighted - totalRawScore);
     const isWeighted = diffWeighted <= diffRaw;
 
-    const sortedKeys = Object.keys(sub.result.evaluation).sort(([keyA], [keyB]) => {
+    const sortedKeys = Object.keys(sub.result.evaluation).sort((keyA, keyB) => {
       return (parseInt(keyA.replace(/\D/g, '')) || 0) - (parseInt(keyB.replace(/\D/g, '')) || 0);
     });
 
