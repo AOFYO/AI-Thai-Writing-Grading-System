@@ -295,7 +295,10 @@ export default function AssignmentWorkspace() {
           body: JSON.stringify({ 
             imageUrl: cloudinaryData.secure_url,
             rubricData: assignment.rubricData,
-            customStylePrompt: activeSkillText
+            customStylePrompt: activeSkillText,
+            userId: user?.uid,
+            assignmentId: assignment.id,
+            studentNumber: parseInt(item.studentNo)
           }),
         });
 
@@ -307,6 +310,7 @@ export default function AssignmentWorkspace() {
           studentNumber: parseInt(item.studentNo),
           imageUrl: cloudinaryData.secure_url,
           result: gradeData,
+          logId: gradeData.log_id || null,
           createdAt: new Date().toISOString()
         };
         
@@ -467,6 +471,19 @@ export default function AssignmentWorkspace() {
         overrideScore: newTotal,
         overriddenAt: new Date().toISOString()
       });
+
+      // Update performance tracking log for AI accuracy
+      const targetLogId = selectedSub.logId || selectedSub.result?.log_id;
+      if (targetLogId) {
+        try {
+          await updateDoc(doc(db, "model_usage_logs", targetLogId), {
+            wasOverridden: true,
+            overrideScore: newTotal
+          });
+        } catch (logErr) {
+          console.warn("Failed to update model_usage_logs override:", logErr);
+        }
+      }
       
       setSubmissions(prev => prev.map(s => s.id === selectedSub.id ? { ...s, result: updatedResult, isOverridden: true, overrideScore: newTotal } : s));
       setSelectedSub(null);
@@ -486,7 +503,10 @@ export default function AssignmentWorkspace() {
         body: JSON.stringify({ 
           overrideText: editedText,
           rubricData: assignment.rubricData,
-          customStylePrompt: activeSkillText
+          customStylePrompt: activeSkillText,
+          userId: user?.uid,
+          assignmentId: assignment.id,
+          studentNumber: selectedSub.studentNumber
         }),
       });
       const data = await res.json();
