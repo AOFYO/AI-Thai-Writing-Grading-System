@@ -24,7 +24,12 @@ export async function getAIConfig(): Promise<AIConfig> {
   try {
     const configSnap = await getDoc(doc(db, 'settings', 'ai_config'));
     if (configSnap.exists()) {
-      return { ...DEFAULT_AI_CONFIG, ...configSnap.data() } as AIConfig;
+      const data = configSnap.data() as Partial<AIConfig>;
+      // Auto-heal if old/deprecated 2.x model was saved previously
+      if (data.activeModelId && (data.activeModelId.includes('2.5') || data.activeModelId.includes('2.0'))) {
+        data.activeModelId = 'gemini-3.5-flash-lite';
+      }
+      return { ...DEFAULT_AI_CONFIG, ...data } as AIConfig;
     }
   } catch (err) {
     console.warn('[ModelRouter] Failed to fetch settings/ai_config from Firestore, using default:', err);

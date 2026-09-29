@@ -1,5 +1,7 @@
 import { PromptPayload } from '../prompt-builder';
 
+const OPENROUTER_TIMEOUT_MS = 25000; // 25 seconds timeout guard
+
 export async function callOpenRouterModel(
   modelId: string,
   payload: PromptPayload,
@@ -38,22 +40,25 @@ export async function callOpenRouterModel(
     'X-Title': 'AI Thai Writing Grading System'
   };
 
-  // Attempt with standard payload
-  const makeRequest = async (useJsonMode: boolean) => {
+  // Setup AbortController for 25-second timeout guard
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPENROUTER_TIMEOUT_MS);
+
+  try {
     const body: any = {
       model: modelId,
       messages,
       temperature: 0.1
     };
-    if (useJsonMode) {
-      body.response_format = { type: 'json_object' };
-    }
 
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers,
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
+
+    clearTimeout(timeoutId);
 
     const data = await res.json();
     if (!res.ok) {
@@ -67,15 +72,10 @@ export async function callOpenRouterModel(
     }
 
     return content;
-  };
-
-  try {
-    return await makeRequest(true);
   } catch (err: any) {
-    // If the error was due to response_format not supported by this specific model, retry without it
-    if (err.message && (err.message.includes('response_format') || err.message.includes('json_object'))) {
-      console.warn(`[OpenRouter] ${modelId} does not support response_format: json_object, retrying with raw prompt...`);
-      return await makeRequest(false);
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`OpenRouter model ${modelId} timed out after 25s. Fallback triggered.`);
     }
     throw err;
   }

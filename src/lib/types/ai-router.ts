@@ -68,30 +68,32 @@ export interface ModelUsageLog {
 
 export const DEFAULT_AI_CONFIG: AIConfig = {
   activeRoute: 'gemini',
-  activeModelId: 'gemini-3.8-flash',
+  activeModelId: 'gemini-3.5-flash-lite', // 500 RPD, 15 RPM, high throughput & fast
   fallbackEnabled: true,
   fallbackChain: [
-    { provider: 'gemini', modelId: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', isFree: true },
+    { provider: 'gemini', modelId: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite (สำรอง 500 RPD)', isFree: true },
+    { provider: 'openrouter', modelId: 'dots-studio/dots-3-note-preview:free', name: 'Dots3 Note Preview (Free อันดับ 1)', isFree: true },
     { provider: 'openrouter', modelId: 'qwen/qwen3.8-27b:free', name: 'Qwen 3.8 27B (Free)', isFree: true },
-    { provider: 'openrouter', modelId: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B (Free)', isFree: true },
-    { provider: 'openrouter', modelId: 'openrouter/free', name: 'OpenRouter Free Auto-select', isFree: true },
-    { provider: 'gemini', modelId: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite (Rescue)', isFree: true },
+    { provider: 'openrouter', modelId: 'thinkingmachines/inkling:free', name: 'Inkling (Free Context 1M)', isFree: true },
+    { provider: 'gemini', modelId: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (ฉลาดสุด 20 RPD)', isFree: true },
+    { provider: 'openrouter', modelId: 'openrouter/free', name: 'OpenRouter Free Auto-select (ฉุกเฉิน)', isFree: true },
+    { provider: 'gemini', modelId: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite (Rescue Net)', isFree: true },
   ],
   circuitBreaker: {}
 };
 
 export const AVAILABLE_MODELS: Record<AIProvider, { id: string; name: string; isFree: boolean; contextLength: string }[]> = {
   gemini: [
-    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (แนะนำ - เร็วและฉลาดสุด)', isFree: true, contextLength: '1M' },
-    { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash (เสถียรสูง)', isFree: true, contextLength: '1M' },
-    { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', isFree: true, contextLength: '1M' },
-    { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite (เร็วและประหยัด)', isFree: true, contextLength: '1M' },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Legacy)', isFree: true, contextLength: '1M' },
+    { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite (แนะนำ - 500 ครั้ง/วัน, 15 RPM)', isFree: true, contextLength: '1M' },
+    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite (สำรอง - 500 ครั้ง/วัน, 15 RPM)', isFree: true, contextLength: '1M' },
+    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (ฉลาดที่สุด - 20 ครั้ง/วัน)', isFree: true, contextLength: '1M' },
+    { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash (เสถียรสูง - 20 ครั้ง/วัน)', isFree: true, contextLength: '1M' },
+    { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (20 ครั้ง/วัน)', isFree: true, contextLength: '1M' },
   ],
   openrouter: [
+    { id: 'dots-studio/dots-3-note-preview:free', name: 'Dots3 Note Preview (Free - ยอดนิยมอันดับ 1 สำหรับเอกสาร)', isFree: true, contextLength: '512K' },
     { id: 'qwen/qwen3.8-27b:free', name: 'Qwen 3.8 27B (Free - รองรับ Vision & ภาษาไทยดี)', isFree: true, contextLength: '262K' },
-    { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B (Free - Vision)', isFree: true, contextLength: '262K' },
-    { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B (Free - Vision)', isFree: true, contextLength: '262K' },
+    { id: 'thinkingmachines/inkling:free', name: 'Thinking Machines Inkling (Free - Context 1M)', isFree: true, contextLength: '1M' },
     { id: 'openrouter/free', name: 'OpenRouter Free Auto-Route (เลือกตัวฟรีที่ดีที่สุดอัตโนมัติ)', isFree: true, contextLength: '200K' },
   ]
 };

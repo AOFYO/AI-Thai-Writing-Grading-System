@@ -319,11 +319,11 @@ export default function AssignmentWorkspace() {
         updatePendingFile(item.id, { status: "success", result: gradeData });
         setSubmissions(prev => [...prev.filter(s => s.studentNumber !== newSub.studentNumber), { id: subRef.id, ...newSub }]); 
         
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 4000));
         
       } catch (err: any) {
         updatePendingFile(item.id, { status: "error", errorMsg: err.message });
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 4000));
       }
     }
     
